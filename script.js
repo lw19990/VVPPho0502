@@ -4376,7 +4376,7 @@ function renderChatHistory(maintainScroll = false) {
                     b.appendChild(q); 
                 } 
                 const t = document.createElement('span'); 
-                t.innerText = msg.content; 
+                t.innerText = msg.role === 'assistant' ? stripLeadingLeakedTimePrefix(msg.content) : msg.content; 
                 b.appendChild(t); 
                 bc.appendChild(b);
                 if (!isSelectionMode) { 
@@ -4728,8 +4728,20 @@ function handleEnterKey(event) {
     }
 }
 
+const LEAKED_TIME_PREFIX_REGEX = /^\s*(?:[\[［]\s*发送于\s*[：:]\s*\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s*[\]］]|[\[［]\s*\d{1,2}:\d{2}:\d{2}\s*[\]］])\s*/;
+
+function stripLeadingLeakedTimePrefix(text) {
+    let content = String(text || '');
+    let previous = '';
+    while (content !== previous) {
+        previous = content;
+        content = content.replace(LEAKED_TIME_PREFIX_REGEX, '');
+    }
+    return content.trim();
+}
+
 function extractThoughtAndBody(rawContent) {
-    let content = String(rawContent || '').trim();
+    let content = stripLeadingLeakedTimePrefix(rawContent);
     let thought = null;
     const thoughtMatch = content.match(/^\[(?:THOUGHTS|thoughts):(.*?)\]/s);
     if (thoughtMatch) {
@@ -4737,6 +4749,7 @@ function extractThoughtAndBody(rawContent) {
         content = content.replace(thoughtMatch[0], '').trim();
         content = content.replace(/^\|\|\|\s*/, '').trim();
     }
+    content = stripLeadingLeakedTimePrefix(content);
     return { thought, content };
 }
 
@@ -5714,7 +5727,7 @@ async function triggerAIResponse(options = {}) {
                 renderChatHistory();
             }
             if (content && content.trim()) {
-                content = content.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
+                content = stripLeadingLeakedTimePrefix(content);
                 
                 if (aiStickerEnabled) {
                     const stickerRegex = /\[STICKER:(.*?)\]/g;
@@ -5764,7 +5777,7 @@ async function triggerAIResponse(options = {}) {
                     const responseCharacterName = currentChatContact.name;
                     let delay = (isTransferEvent || isRedPacketEvent) ? 500 : 0;
                     parts.forEach((part, index) => { 
-                        const clean = part; 
+                        const clean = stripLeadingLeakedTimePrefix(part); 
                         if (clean) { 
                             setTimeout(() => {
                                 const isLastPart = index === parts.length - 1;
