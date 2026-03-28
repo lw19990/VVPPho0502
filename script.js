@@ -4596,7 +4596,7 @@ function mapChatMessageForBackgroundAPI(msg) {
 function extractBackgroundReplyParts(rawContent) {
     let content = String(rawContent || '').trim();
     let thought = null;
-    const thoughtMatch = content.match(/^\[THOUGHTS:(.*?)\]/s);
+    const thoughtMatch = content.match(/^\[(?:THOUGHTS|thoughts):(.*?)\]/s);
     if (thoughtMatch) {
         thought = thoughtMatch[1].trim();
         content = content.replace(thoughtMatch[0], '').trim();
@@ -4728,9 +4728,21 @@ function handleEnterKey(event) {
     }
 }
 
+function extractThoughtAndBody(rawContent) {
+    let content = String(rawContent || '').trim();
+    let thought = null;
+    const thoughtMatch = content.match(/^\[(?:THOUGHTS|thoughts):(.*?)\]/s);
+    if (thoughtMatch) {
+        thought = thoughtMatch[1].trim();
+        content = content.replace(thoughtMatch[0], '').trim();
+        content = content.replace(/^\|\|\|\s*/, '').trim();
+    }
+    return { thought, content };
+}
+
 function sendMessage() { const isCallActive = document.getElementById('call-screen').classList.contains('active'); const isOfflineActive = document.getElementById('offline-mode').classList.contains('active'); let inputId = 'message-input'; if (isCallActive) inputId = 'call-message-input'; if (isOfflineActive) inputId = 'offline-message-input'; const input = document.getElementById(inputId); const t = input.value.trim(); if (!t) return; saveMessage('user', t, pendingQuoteContent); input.value = ''; cancelQuote(); if (isOfflineActive) { document.getElementById('offline-typing-indicator').style.display = 'block'; triggerAIResponse(); } }
 function regenerateLastResponse() { if (!currentChatContact) return; const c = DB.getChats(); let chat = c[currentChatContact.id] || []; if (chat.length === 0) return; let removed = false; while (chat.length > 0 && chat[chat.length - 1].role === 'assistant') { chat.pop(); removed = true; } if (removed) { DB.saveChats(c); renderChatHistory(); triggerAIResponse(); } else alert("最后一条不是AI消息"); }
-function continueChat() { triggerAIResponse(); }
+function continueChat() { triggerAIResponse({ continueFromLastAssistant: true }); }
 let callTimerInterval = null;
 let callSeconds = 0;
 function startCall() { 
@@ -4801,13 +4813,9 @@ async function triggerCallStartResponse() {
         const data = await response.json();
         if (data.choices && data.choices.length > 0) {
             let content = data.choices[0].message.content;
-            let extractedThought = null;
-            const thoughtMatch = content.match(/^\[THOUGHTS:(.*?)\]/s);
-            if (thoughtMatch) {
-                extractedThought = thoughtMatch[1].trim();
-                content = content.replace(thoughtMatch[0], '').trim();
-                content = content.replace(/^\|\|\|\s*/, '').trim();
-            }
+            const extracted = extractThoughtAndBody(content);
+            let extractedThought = extracted.thought;
+            content = extracted.content;
             document.getElementById('call-status').innerText = "通话中";
             if (content && content.trim()) {
                 saveMessage('assistant', content, null, extractedThought);
@@ -5351,7 +5359,7 @@ function getCalendarContextPrompt() {
     return "";
 }
 
-async function triggerAIResponse() {
+async function triggerAIResponse(options = {}) {
     if (!currentChatContact) return;
     const settings = DB.getSettings();
     if (!settings.key) return alert('请配置 API Key');
@@ -5546,6 +5554,20 @@ async function triggerAIResponse() {
     }
 
     const messages = [{ role: "system", content: systemContent }, ...apiMessages];
+    if (options.continueFromLastAssistant === true && !isCallActive && !isOfflineActive) {
+        const lastAssistantMsg = [...limitedHistory].reverse().find(m => m.role === 'assistant' && !m.type && !m.isRetracted && m.content);
+        if (!lastAssistantMsg) {
+            document.getElementById('typing-indicator').style.display = 'none';
+            clearTimeout(timeoutId);
+            alert('没有可续写的上一条AI消息');
+            return;
+        }
+        const lastText = String(lastAssistantMsg.content || '').replace(/\s+/g, ' ').trim().slice(-120);
+        messages.push({
+            role: "user",
+            content: `[系统提示：请你只续写你“上一条助手消息”的后续内容，保持同一语气与语境，不要复述或改写已说过的话，不要重复开场。上一条末尾参考：${lastText}]`
+        });
+    }
 
     try {
         const temp = settings.temperature !== undefined ? settings.temperature : 0.7;
@@ -5586,15 +5608,9 @@ async function triggerAIResponse() {
         
         if (data.choices && data.choices.length > 0) {
             let content = data.choices[0].message.content;
-            
-
-            let extractedThought = null;
-            const thoughtMatch = content.match(/^\[THOUGHTS:(.*?)\]/s);
-            if (thoughtMatch) {
-                extractedThought = thoughtMatch[1].trim();
-                content = content.replace(thoughtMatch[0], '').trim();
-                content = content.replace(/^\|\|\|\s*/, '').trim();
-            }
+            const extracted = extractThoughtAndBody(content);
+            let extractedThought = extracted.thought;
+            content = extracted.content;
 
             if (isTransferEvent) {
                 allChats = DB.getChats();
