@@ -4884,10 +4884,9 @@ function createOfflineRainRenderer(container) {
     if (!container) return null;
     const canvas = document.createElement('canvas');
     canvas.className = 'offline-rain-surface';
+    canvas.style.background = 'transparent';
     const gl = canvas.getContext('webgl', { alpha: true, antialias: true, premultipliedAlpha: false });
     if (!gl) return null;
-    container.innerHTML = '';
-    container.appendChild(canvas);
 
     const vertexSource = `
         attribute vec2 aPosition;
@@ -5034,7 +5033,8 @@ function createOfflineRainRenderer(container) {
             float dropletShine = smoothstep(0.35, 1.0, c.x) * 0.09;
             col += vec3(0.95, 0.97, 1.0) * dropletShine;
 
-            float layerAlpha = mix(0.06, 0.78, uHasTexture);
+            // 无背景纹理时，完全由 shader 输出画面，避免白底“吃掉”雨滴效果。
+            float layerAlpha = (uHasTexture > 0.5) ? 0.78 : 1.0;
             gl_FragColor = vec4(col, layerAlpha);
         }
     `;
@@ -5086,11 +5086,16 @@ function createOfflineRainRenderer(container) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     const emptyPixel = new Uint8Array([20, 28, 42, 255]);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, emptyPixel);
+    gl.clearColor(0, 0, 0, 0);
 
     let hasTexture = 0;
     let rafId = 0;
     let startTime = performance.now();
     let rainAmount = 0.82;
+
+    // 仅在初始化成功后挂载，避免 shader 报错时留下遮挡层。
+    container.innerHTML = '';
+    container.appendChild(canvas);
 
     const resize = () => {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -5107,6 +5112,7 @@ function createOfflineRainRenderer(container) {
         const elapsed = (now - startTime) / 1000;
         resize();
         gl.useProgram(program);
+        gl.clear(gl.COLOR_BUFFER_BIT);
         gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
         gl.uniform1f(timeLocation, elapsed);
         gl.uniform1f(rainAmountLocation, rainAmount);
@@ -5123,11 +5129,16 @@ function createOfflineRainRenderer(container) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-            gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, texture);
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-            hasTexture = 1;
+            try {
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+                hasTexture = 1;
+            } catch (error) {
+                console.warn('线下模式背景纹理加载失败，将回退到程序纹理背景:', error);
+                hasTexture = 0;
+            }
         };
         img.onerror = () => {
             hasTexture = 0;
@@ -5158,9 +5169,11 @@ function setOfflineModeBackground(bgUrl) {
     const bgLayer = document.getElementById('offline-bg-photo');
     if (!bgLayer) return;
     if (bgUrl) {
-        bgLayer.style.backgroundImage = `url(${bgUrl})`;
+        const escapedUrl = String(bgUrl).replace(/"/g, '\\"');
+        bgLayer.style.backgroundImage = `url("${escapedUrl}")`;
     } else {
-        bgLayer.style.backgroundImage = 'none';
+        // 无外部图片时使用暗色渐变兜底，保证 shader 雨滴层对比度。
+        bgLayer.style.backgroundImage = 'linear-gradient(180deg, #0f1b2f 0%, #101726 55%, #0a111d 100%)';
     }
     if (offlineRainRenderer) offlineRainRenderer.setImage(bgUrl || '');
 }
@@ -5172,6 +5185,7 @@ function ensureOfflineRainRenderer() {
     try {
         offlineRainRenderer = createOfflineRainRenderer(container);
     } catch (error) {
+        container.innerHTML = '';
         console.error('线下模式雨滴渲染初始化失败:', error);
         return null;
     }
