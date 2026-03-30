@@ -4394,10 +4394,13 @@ function renderChatHistory(maintainScroll = false) {
                 stage.style.width = '100%';
                 stage.style.borderRadius = '18px';
                 stage.style.padding = '0';
-                stage.style.overflow = 'hidden';
+                stage.style.overflow = 'visible';
                 stage.style.boxShadow = '0 8px 24px rgba(50,45,95,0.16)';
                 stage.style.backdropFilter = 'blur(10px)';
-                stage.innerHTML = msg.content || '';
+                stage.style.boxSizing = 'border-box';
+                stage.style.wordBreak = 'break-word';
+                stage.style.overflowWrap = 'anywhere';
+                renderHtmlTheaterIntoStage(stage, msg.content || '');
                 bc.appendChild(stage);
             } else { 
                 const b = document.createElement('div'); 
@@ -5358,6 +5361,69 @@ function sanitizeTheaterHtml(rawHtml) {
     html = html.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
     html = html.replace(/<(iframe|object|embed|link|meta)[\s\S]*?>/gi, '');
     return html.trim();
+}
+
+function normalizeTheaterElementLayout(rootEl) {
+    if (!rootEl) return;
+    const nodes = [rootEl, ...rootEl.querySelectorAll('*')];
+    nodes.forEach(node => {
+        if (!(node instanceof HTMLElement)) return;
+        node.style.maxWidth = '100%';
+        node.style.boxSizing = 'border-box';
+        const widthPx = parseFloat(node.style.width);
+        if (node.style.width && node.style.width.trim().endsWith('px') && !Number.isNaN(widthPx) && widthPx > 280) {
+            node.style.width = '100%';
+        }
+        const minWidthPx = parseFloat(node.style.minWidth);
+        if (node.style.minWidth && node.style.minWidth.trim().endsWith('px') && !Number.isNaN(minWidthPx) && minWidthPx > 280) {
+            node.style.minWidth = '0';
+        }
+        const tag = node.tagName.toUpperCase();
+        if (tag === 'IMG' || tag === 'VIDEO' || tag === 'SVG' || tag === 'CANVAS' || tag === 'TABLE') {
+            node.style.maxWidth = '100%';
+            if (tag !== 'TABLE') node.style.height = 'auto';
+        }
+    });
+}
+
+function renderHtmlTheaterIntoStage(stageEl, rawHtml) {
+    if (!stageEl) return;
+    const safeHtml = sanitizeTheaterHtml(rawHtml);
+    if (!safeHtml) {
+        stageEl.innerHTML = '';
+        return;
+    }
+    stageEl.innerHTML = '';
+    if (typeof stageEl.attachShadow === 'function') {
+        const shadow = stageEl.attachShadow({ mode: 'open' });
+        const baseStyle = document.createElement('style');
+        baseStyle.textContent = `
+            :host { display: block; width: 100%; }
+            .html-theater-host {
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                line-height: 1.5;
+                color: #2f3152;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+            .html-theater-host * {
+                box-sizing: border-box;
+                max-width: 100%;
+            }
+        `;
+        const host = document.createElement('div');
+        host.className = 'html-theater-host';
+        host.innerHTML = safeHtml;
+        shadow.appendChild(baseStyle);
+        shadow.appendChild(host);
+        normalizeTheaterElementLayout(host);
+    } else {
+        stageEl.innerHTML = safeHtml;
+        normalizeTheaterElementLayout(stageEl);
+    }
 }
 
 function buildFallbackTheaterHtml(messageText, characterName) {
