@@ -3239,6 +3239,8 @@ function saveSpyDiaryEdit() {
 async function callSpyAPI(type) { 
     const s = DB.getSettings(); 
     if (!s.key) return alert('请配置 API Key'); 
+    if (!s.url || !s.model) return alert('请先配置 API Base URL 和模型');
+    if (!currentSpyContact) return alert('请先在查岗中选择角色');
     
     const chatHistory = (DB.getChats()[currentSpyContact.id] || []).slice(-20).map(m => `${m.role === 'user' ? 'User' : 'Me'}: ${m.content}`).join('\n');
     
@@ -3284,35 +3286,66 @@ async function callSpyAPI(type) {
 
     try { 
         const temp = s.temperature !== undefined ? s.temperature : 0.7;
-        const res = await fetch(`${s.url}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${s.key}` }, body: JSON.stringify({ model: s.model, messages: [{ role: "system", content: prompt }], temperature: temp }) }); 
-        const data = await res.json(); 
-        if (data.choices?.length > 0) { 
-            let c = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim(); 
-            const parsed = JSON.parse(c); 
-            const sd = DB.getSpyData(); 
-            if (!sd[currentSpyContact.id]) sd[currentSpyContact.id] = {}; 
-            
-            if (type === 'chat') { 
-                sd[currentSpyContact.id].vk_contacts = parsed; 
-                DB.saveSpyData(sd); 
-                renderSpyVKContacts(); 
-            } else if (type === 'memo') { 
-                sd[currentSpyContact.id].memos = parsed; 
-                DB.saveSpyData(sd); 
-                renderSpyMemos(); 
-            } else if (type === 'browser') {
-                sd[currentSpyContact.id].browser_history = parsed;
+        const res = await fetch(`${s.url}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${s.key}` },
+            body: JSON.stringify({
+                model: s.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: temp
+            })
+        });
+        const rawText = await res.text();
+        let data = null;
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch {
+            data = null;
+        }
+
+        if (!res.ok) {
+            const errorMsg = data?.error?.message || data?.message || rawText || `HTTP ${res.status}`;
+            throw new Error(`请求失败（${res.status}）：${errorMsg}`);
+        }
+
+        const content = data?.choices?.[0]?.message?.content;
+        if (!content || typeof content !== 'string') {
+            throw new Error('模型未返回有效内容，请重试');
+        }
+
+        let parsed;
+        try {
+            const cleaned = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            parsed = JSON.parse(cleaned);
+        } catch {
+            throw new Error('模型返回内容不是有效JSON，请重试');
+        }
+
+        const sd = DB.getSpyData(); 
+        if (!sd[currentSpyContact.id]) sd[currentSpyContact.id] = {}; 
+        
+        if (type === 'chat') { 
+            sd[currentSpyContact.id].vk_contacts = parsed; 
+            DB.saveSpyData(sd); 
+            renderSpyVKContacts(); 
+        } else if (type === 'memo') { 
+            sd[currentSpyContact.id].memos = parsed; 
+            DB.saveSpyData(sd); 
+            renderSpyMemos(); 
+        } else if (type === 'browser') {
+            sd[currentSpyContact.id].browser_history = parsed;
+            DB.saveSpyData(sd);
+            renderSpyBrowser();
+        } else if (type === 'diary') {
+            if (!sd[currentSpyContact.id].diaries) sd[currentSpyContact.id].diaries = [];
+            if (parsed.content) {
+                sd[currentSpyContact.id].diaries.push({ id: Date.now(), content: parsed.content });
                 DB.saveSpyData(sd);
-                renderSpyBrowser();
-            } else if (type === 'diary') {
-                if (!sd[currentSpyContact.id].diaries) sd[currentSpyContact.id].diaries = [];
-                if (parsed.content) {
-                    sd[currentSpyContact.id].diaries.push({ id: Date.now(), content: parsed.content });
-                    DB.saveSpyData(sd);
-                    renderSpyDiaries();
-                }
+                renderSpyDiaries();
+            } else {
+                throw new Error('日记内容为空，请重试');
             }
-        } 
+        }
     } catch (e) { 
         alert("生成失败：" + e.message); 
     } 
