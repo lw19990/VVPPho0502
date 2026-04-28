@@ -984,6 +984,43 @@ function waterTree() {
 // --- 表情包功能 ---
 let currentStickerUploadTab = 'single';
 
+function isAiStickerEnabledForContact(contact) {
+    return contact?.userSettings?.enableAiStickers === true;
+}
+
+function syncAiStickerToggleForCurrentChat() {
+    const toggle = document.getElementById('ai-sticker-toggle');
+    if (!toggle) return;
+    toggle.checked = isAiStickerEnabledForContact(currentChatContact);
+}
+
+function persistAiStickerToggleForCurrentChat(enabled) {
+    if (!currentChatContact) return;
+    const contacts = DB.getContacts();
+    const contactIndex = contacts.findIndex(c => c.id === currentChatContact.id);
+    if (contactIndex === -1) return;
+
+    const currentUserSettings = contacts[contactIndex].userSettings || {};
+    contacts[contactIndex] = {
+        ...contacts[contactIndex],
+        userSettings: {
+            ...currentUserSettings,
+            enableAiStickers: enabled === true
+        }
+    };
+    DB.saveContacts(contacts);
+    currentChatContact = contacts[contactIndex];
+}
+
+function initAiStickerToggle() {
+    const toggle = document.getElementById('ai-sticker-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('change', () => {
+        persistAiStickerToggleForCurrentChat(toggle.checked);
+    });
+    syncAiStickerToggleForCurrentChat();
+}
+
 function setChatToolsBarExpanded(expanded) {
     const toolsBar = document.getElementById('chat-tools-bar');
     const toggleBtn = document.getElementById('toggle-tools-btn');
@@ -3362,6 +3399,7 @@ let voiceFinalTranscript = '';
 let displayedMessageCount = 20; // 初始显示的消息数量
 const MESSAGES_PER_PAGE = 20; // 每次加载的消息数量
 let chatOnlineStatusTimer = null;
+initAiStickerToggle();
 function renderVKList() { const l = document.getElementById('vk-chat-list'); l.innerHTML = ''; DB.getContacts().forEach(c => { const d = document.createElement('div'); d.className = 'chat-list-item'; d.onclick = () => openChat(c); d.innerHTML = `<img src="${c.avatar || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23ccc%22 width=%22100%22 height=%22100%22/></svg>'}" class="avatar-preview"><div class="contact-info"><div class="contact-name">${c.name}</div><div class="contact-persona">点击开始聊天</div></div>`; l.appendChild(d); }); }
 function openChat(c) { 
     currentChatContact = c; 
@@ -3376,10 +3414,11 @@ function openChat(c) {
     exitDeleteMode(); 
     cancelQuote(); 
     applyChatTheme(c); 
+    syncAiStickerToggleForCurrentChat();
     renderChatHistory(); 
 }
 function applyChatTheme(contact) { const theme = contact.chatTheme || {}; const styleTag = document.getElementById('dynamic-chat-theme'); const chatInterface = document.getElementById('chat-interface'); if (theme.bgType === 'image' && theme.bgValue) { chatInterface.style.backgroundImage = `url(${theme.bgValue})`; chatInterface.style.backgroundColor = 'transparent'; } else { chatInterface.style.backgroundImage = 'none'; chatInterface.style.backgroundColor = theme.bgValue || '#f5f5f5'; } let css = ''; if (theme.userBubbleColor) css += `.message-bubble.user { background-color: ${theme.userBubbleColor} !important; color: #fff; } `; if (theme.userBubbleCSS) css += `.message-bubble.user { ${theme.userBubbleCSS} } `; if (theme.aiBubbleColor) css += `.message-bubble.ai { background-color: ${theme.aiBubbleColor} !important; } `; if (theme.aiBubbleCSS) css += `.message-bubble.ai { ${theme.aiBubbleCSS} } `; styleTag.innerHTML = css; }
-function closeChat() { document.getElementById('chat-interface').style.display = 'none'; if (chatOnlineStatusTimer) { clearInterval(chatOnlineStatusTimer); chatOnlineStatusTimer = null; } currentChatContact = null; }
+function closeChat() { document.getElementById('chat-interface').style.display = 'none'; if (chatOnlineStatusTimer) { clearInterval(chatOnlineStatusTimer); chatOnlineStatusTimer = null; } currentChatContact = null; syncAiStickerToggleForCurrentChat(); }
 let currentChatBgType = 'color';
 function updateChatUserAccountOptions(preferredId = '') {
     const select = document.getElementById('chat-user-account-select');
@@ -5655,7 +5694,7 @@ async function triggerAIResponse(options = {}) {
     const boundIds = currentChatContact.boundWorldBooks || [];
     if (boundIds.length > 0) { systemContent += `\n\n[角色专属设定]\n`; boundIds.forEach(bid => { const entry = wb.entries.find(e => e.id == bid); if (entry) systemContent += `【${entry.title}】：${entry.content}\n`; }); }
 
-    const aiStickerEnabled = document.getElementById('ai-sticker-toggle').checked;
+    const aiStickerEnabled = isAiStickerEnabledForContact(currentChatContact);
     if (aiStickerEnabled) {
         const stickers = DB.getStickers();
         if (stickers.length > 0) {
