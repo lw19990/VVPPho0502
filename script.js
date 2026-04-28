@@ -5519,6 +5519,7 @@ async function triggerAIResponse(options = {}) {
     const summaryInterval = Math.max(1, Number(userSettings.summaryInterval) || 50);
     const htmlTheaterEnabled = userSettings.enableHtmlTheater === true && !isCallActive && !isOfflineActive;
     const limitedHistory = history.slice(-contextLimit);
+    const historyOffset = history.length - limitedHistory.length;
 
     let pendingTransferIndex = -1, pendingTransferAmount = 0, pendingTransferNote = '';
     let pendingRedPacketIndex = -1, pendingRedPacketAmount = 0, pendingRedPacketNote = '';
@@ -5532,23 +5533,23 @@ async function triggerAIResponse(options = {}) {
     
     for (let i = limitedHistory.length - 1; i >= 0; i--) {
         if (limitedHistory[i].type === 'transfer' && limitedHistory[i].status === 'pending') {
-            pendingTransferIndex = i; pendingTransferAmount = limitedHistory[i].amount; pendingTransferNote = limitedHistory[i].note;
+            pendingTransferIndex = historyOffset + i; pendingTransferAmount = limitedHistory[i].amount; pendingTransferNote = limitedHistory[i].note;
         }
         if (limitedHistory[i].type === 'redpacket' && limitedHistory[i].status === 'pending') {
-            pendingRedPacketIndex = i; pendingRedPacketAmount = limitedHistory[i].amount; pendingRedPacketNote = limitedHistory[i].note;
+            pendingRedPacketIndex = historyOffset + i; pendingRedPacketAmount = limitedHistory[i].amount; pendingRedPacketNote = limitedHistory[i].note;
         }
         // 只有在未绑定情侣空间且最后一条消息是邀请时才处理
         if (!isAlreadyCoupled && i === limitedHistory.length - 1 && limitedHistory[i].type === 'couple_invite_req') {
-            pendingInviteIndex = i;
+            pendingInviteIndex = historyOffset + i;
         }
         if (i === limitedHistory.length - 1 && limitedHistory[i].type === 'pay_invite_req' && limitedHistory[i].status === 'pending') {
-            pendingPayInviteIndex = i;
+            pendingPayInviteIndex = historyOffset + i;
             pendingPayInviteAmount = Number(limitedHistory[i].amount) || 0;
             pendingPayInviteCurrency = limitedHistory[i].currencyUnit || 'cny';
             pendingPayInviteAmountText = limitedHistory[i].amountText || formatAmountByCurrency(pendingPayInviteAmount, pendingPayInviteCurrency);
         }
         if (i === limitedHistory.length - 1 && limitedHistory[i].type === 'gift_req' && limitedHistory[i].status === 'pending') {
-            pendingGiftIndex = i;
+            pendingGiftIndex = historyOffset + i;
             pendingGiftTitle = limitedHistory[i].title || '礼物';
             pendingGiftAmountText = limitedHistory[i].amountText || formatAmountByCurrency(limitedHistory[i].amount || 0, limitedHistory[i].currencyUnit || 'cny');
         }
