@@ -506,13 +506,14 @@ const DB = {
             key: '',
             model: 'gpt-3.5-turbo',
             prompt: DEFAULT_SYSTEM_PROMPT,
-            fullscreen: false,
+            fullscreen: true,
             temperature: 0.7,
             keepAliveEnabled: false,
             notificationPermissionGranted: false
         };
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
+        if (saved.fullscreen === undefined) saved.fullscreen = true;
         if (saved.temperature === undefined) saved.temperature = 0.7;
         if (saved.keepAliveEnabled === undefined) saved.keepAliveEnabled = false;
         if (saved.notificationPermissionGranted === undefined) saved.notificationPermissionGranted = false;
