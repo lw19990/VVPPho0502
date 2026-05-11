@@ -155,7 +155,7 @@
                     </div>
                     <div class="bottom-app-icon-label">提问箱</div>
                 </div>
-                <div class="bottom-app-item" onclick="showComingSoonNotice()">
+                <div class="bottom-app-item" onclick="openApp('app-kitchen')">
                     <div class="bottom-app-icon" id="icon-bottom-kitchen">
                     <div class="bottom-app-icon-svg"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/><path d="M6 17h12"/></svg></div>
                     </div>
@@ -2406,6 +2406,86 @@
                         <button class="suika-close-btn" onclick="closeSuikaSettings()">×</button>
                     </div>
                     <div id="suika-ball-settings-list" class="suika-ball-settings-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 26. 小厨房 App -->
+        <div id="app-kitchen" class="screen">
+            <div class="app-header kitchen-header">
+                <div class="back-btn" onclick="goHome()">Home</div>
+                <div class="app-title">小厨房</div>
+                <div class="kitchen-header-actions">
+                    <button class="action-btn kitchen-clear-btn" type="button" onclick="clearKitchenPot()">清空</button>
+                </div>
+            </div>
+
+            <div class="kitchen-container">
+                <div class="kitchen-pot-area">
+                    <button class="kitchen-tool-switch-btn" type="button" onclick="openKitchenToolModal()">厨具切换</button>
+                    <button class="kitchen-recipe-float-btn" type="button" onclick="openKitchenRecipeModal()">食谱参考</button>
+                    <div class="kitchen-tool-icon-wrap">
+                        <div class="kitchen-tool-icon" id="kitchen-current-tool-icon"></div>
+                        <div class="kitchen-tool-name" id="kitchen-current-tool-name">锅</div>
+                    </div>
+                    <div class="kitchen-pot-contents" id="kitchen-pot-display">
+                        <span class="kitchen-pot-placeholder">点击下方食材加入当前厨具</span>
+                    </div>
+                </div>
+
+                <button class="kitchen-cook-btn" type="button" onclick="startKitchenCooking()">合成</button>
+
+                <div class="kitchen-shelf-area">
+                    <div class="kitchen-category-tabs">
+                        <button class="kitchen-tab-btn" id="kitchen-tab-veg" type="button" onclick="switchKitchenTab('veg')">蔬菜</button>
+                        <button class="kitchen-tab-btn" id="kitchen-tab-fruit" type="button" onclick="switchKitchenTab('fruit')">水果</button>
+                        <button class="kitchen-tab-btn" id="kitchen-tab-drink" type="button" onclick="switchKitchenTab('drink')">饮品</button>
+                        <button class="kitchen-tab-btn active" id="kitchen-tab-staple" type="button" onclick="switchKitchenTab('staple')">主食</button>
+                        <button class="kitchen-tab-btn" id="kitchen-tab-meat" type="button" onclick="switchKitchenTab('meat')">肉类</button>
+                        <button class="kitchen-tab-btn" id="kitchen-tab-condiments" type="button" onclick="switchKitchenTab('condiments')">调料</button>
+                        <button class="kitchen-tab-btn" id="kitchen-tab-others" type="button" onclick="switchKitchenTab('others')">其他</button>
+                    </div>
+                    <div class="kitchen-ingredient-grid" id="kitchen-shelf-grid"></div>
+                </div>
+            </div>
+
+            <div id="kitchen-overlay" class="kitchen-overlay">
+                <div id="kitchen-loading-state" class="kitchen-loading-state">
+                    <div class="kitchen-loading-spinner">🥘</div>
+                    <div class="kitchen-loading-title">正在制作中...</div>
+                    <div class="kitchen-loading-desc">大厨正在努力翻炒</div>
+                </div>
+                <div id="kitchen-result-state" class="kitchen-result-state">
+                    <div class="kitchen-result-title">合成成功!</div>
+                    <div id="kitchen-result-emoji" class="kitchen-result-emoji">🍣</div>
+                    <div id="kitchen-result-text" class="kitchen-result-text">已成功制作 <b>寿司</b></div>
+                    <button class="kitchen-gift-btn" type="button" onclick="openKitchenGiftModal()">将食物赠送给TA</button>
+                    <button class="kitchen-reset-btn" type="button" onclick="resetKitchenApp()">再做一份</button>
+                </div>
+            </div>
+
+            <div id="kitchen-tool-modal" class="kitchen-tool-modal" onclick="closeKitchenToolModal()">
+                <div class="kitchen-tool-modal-card" onclick="event.stopPropagation()">
+                    <div class="kitchen-tool-modal-title">选择厨具</div>
+                    <div id="kitchen-tool-option-list" class="kitchen-tool-option-list"></div>
+                </div>
+            </div>
+
+            <div id="kitchen-recipe-modal" class="kitchen-tool-modal" onclick="closeKitchenRecipeModal()">
+                <div class="kitchen-recipe-modal-card" onclick="event.stopPropagation()">
+                    <div class="kitchen-tool-modal-title">食谱参考</div>
+                    <div id="kitchen-recipe-list" class="kitchen-recipe-list"></div>
+                </div>
+            </div>
+
+            <div id="kitchen-gift-modal" class="kitchen-tool-modal" onclick="closeKitchenGiftModal()">
+                <div class="kitchen-gift-modal-card" onclick="event.stopPropagation()">
+                    <div class="kitchen-tool-modal-title">选择赠送对象</div>
+                    <div id="kitchen-gift-list" class="kitchen-gift-list"></div>
+                    <div class="kitchen-gift-actions">
+                        <button class="kitchen-gift-cancel" type="button" onclick="closeKitchenGiftModal()">取消</button>
+                        <button class="kitchen-gift-confirm" type="button" onclick="confirmKitchenGift()">确认赠送</button>
+                    </div>
                 </div>
             </div>
         </div>

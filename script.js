@@ -225,6 +225,363 @@ function openApp(appId) {
     if(appId === 'app-game') initSuikaApp();
     if(appId === 'app-wallet') initWalletApp();
     if(appId === 'app-shopping') renderShoppingApp();
+    if(appId === 'app-kitchen') initKitchenApp();
+}
+
+const kitchenToolIcons = {
+    pot: `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M194.214818 505.126452l0 239.856833c0 64.299445 52.157917 116.4195 116.456339 116.4195l397.912615 0c64.317864 0 116.476805-52.120055 116.476805-116.4195L825.060577 505.126452 194.214818 505.126452z" fill="#CAB28E"></path><path d="M206.244806 582.620407 63.836399 542.055526 75.267752 501.891781 217.677183 542.456662Z" fill="#CAB28E"></path><path d="M957.254342 546.308387 812.845371 578.9846 803.613102 538.239618 948.060959 505.59922Z" fill="#CAB28E"></path><path d="M759.487116 376.22978c4.270257 28.314883-139.355885 54.05922-307.135122 79.283718-167.741375 25.224498-296.122301 40.417525-300.374138 12.103666-4.252861-28.314883 128.269385-71.721485 296.048623-96.966449C615.78832 345.425194 755.236302 347.913874 759.487116 376.22978" fill="#CAB28E"></path><path d="M488.228085 416.71996 432.943968 425.044556 420.858722 344.534917 476.088604 336.211345Z" fill="#CAB28E"></path></svg>`,
+    pan: `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M941.9 891.5L801.3 758.4c27.9-33.5 50.5-70.7 67.5-111.1 22-52.5 33.4-108 34-165.1 0.6-57.1-9.6-112.9-30.4-165.8-21.5-54.8-53.5-104.1-95-146.6-41.5-42.4-90.1-75.5-144.4-98.2-52.5-22-108-33.4-165.1-34C410.8 36.8 355 47 302 67.8c-54.8 21.5-104.1 53.5-146.6 95C113 204.3 80 252.9 57.2 307.2c-22 52.5-33.4 108-34 165.1-0.6 57.1 9.6 112.9 30.4 165.8 21.5 54.8 53.5 104.1 95 146.6 41.5 42.4 90.1 75.5 144.4 98.2 52.5 22 108 33.4 165.1 34h5c55.4 0 109.4-10.2 160.8-30.4 43-16.9 82.6-40.2 118.2-69.5l142.4 134.9c8.1 7.6 18.4 11.4 28.6 11.4 11 0 22.1-4.4 30.3-13 16-16.6 15.2-42.9-1.5-58.8z" fill="#333333"></path></svg>`,
+    board: `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M952.9 617.65H71.1l51.89-240.3h778.02z" fill="#AD8C78"></path><path d="M959.84 623.25H64.16l54.31-251.5h787.06l54.31 251.5z m-881.8-11.21h867.91l-49.47-229.09H127.51L78.04 612.04z" fill="#020202"></path><path d="M71.1 617.65v28.98l881.8-2.45v-26.53z" fill="#AD8C78"></path><path d="M65.5 652.25v-40.21h893v37.73l-893 2.48z m11.2-29v17.76l870.59-2.42v-15.34H76.7z" fill="#020202"></path></svg>`,
+    cup: `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M647.4 764c-7.7 0-14-6.3-14-14V631c0-7.7 6.3-14 14-14s14 6.3 14 14v119c0 7.7-6.3 14-14 14zM647.4 595.4c-7.7 0-14-6.3-14-14v-19.8c0-7.7 6.3-14 14-14s14 6.3 14 14v19.8c0 7.8-6.3 14-14 14z" fill="currentColor"></path><path d="M687.1 883H290.4c-29.6 0-53.7-24.1-53.7-53.7V278.2L168 175.1c-4.5-6.7-4.9-15.3-1.1-22.5 3.8-7.1 11.2-11.6 19.3-11.6h554.5v688.3c0 29.6-24.1 53.7-53.6 53.7zM197.5 169l63.5 95.2c2.4 3.6 3.7 7.8 3.7 12.2v552.9c0 14.2 11.5 25.7 25.7 25.7h396.7c14.2 0 25.7-11.5 25.7-25.7V169H197.5z" fill="currentColor"></path><path d="M726.7 526h-14V141H806c29.6 0 53.7 24.1 53.7 53.7V393c0 73.3-59.6 133-133 133z m14-357v328.1c51.3-6.9 91-50.9 91-104.1V194.7c0-14.2-11.5-25.7-25.7-25.7h-65.3z" fill="currentColor"></path></svg>`,
+    bowl: `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M154 450h716c0 210-160 364-358 364S154 660 154 450z" fill="#d9a067"></path><path d="M132 420h760c0 24-18 44-42 44H174c-24 0-42-20-42-44z" fill="#bf7f43"></path><path d="M228 812h568v50H228z" fill="#b37b47"></path></svg>`
+};
+const kitchenTools = [
+    { id: 'pot', name: '锅' },
+    { id: 'pan', name: '平底锅' },
+    { id: 'board', name: '菜板' },
+    { id: 'cup', name: '水杯' },
+    { id: 'bowl', name: '碗' }
+];
+const kitchenIngredientDB = {
+    veg: ['🥬', '🍅', '🥑', '🥒', '🌽'],
+    fruit: [],
+    drink: ['🥛', '🍵'],
+    staple: ['🍚', '🍞'],
+    meat: ['🥩', '🥓'],
+    condiments: [],
+    others: ['🐟', '🧀', '🧈', '🧊']
+};
+const kitchenIngredientNames = {
+    '🍚': '米饭',
+    '🍞': '面包',
+    '🧀': '芝士',
+    '🥩': '肉',
+    '🥬': '生菜',
+    '🥓': '培根',
+    '🍅': '番茄',
+    '🥑': '牛油果',
+    '🥒': '黄瓜',
+    '🌽': '玉米',
+    '🧈': '黄油',
+    '🥛': '牛奶',
+    '🍵': '茶',
+    '🧊': '冰块',
+    '🐟': '鱼'
+};
+const kitchenRecipeConfigs = [
+    { ingredients: ['🍞', '🧀', '🥩', '🥬'], tool: 'board', resultEmoji: '🍔', resultName: '汉堡' },
+    { ingredients: ['🍞', '🥓', '🥬'], tool: 'board', resultEmoji: '🥪', resultName: '三明治' },
+    { ingredients: ['🥬', '🍅', '🥑', '🥒'], tool: 'bowl', resultEmoji: '🥗', resultName: '沙拉' },
+    { ingredients: ['🍞', '🥩'], tool: 'pan', resultEmoji: '🌭', resultName: '热狗' },
+    { ingredients: ['🌽', '🧈'], tool: 'pan', resultEmoji: '🍿', resultName: '爆米花' },
+    { ingredients: ['🍞', '🧈'], tool: 'pan', resultEmoji: '🥞', resultName: '烙饼' },
+    { ingredients: ['🥛', '🍵', '🧊'], tool: 'cup', resultEmoji: '🧋', resultName: '冰奶茶' },
+    { ingredients: ['🐟', '🍚'], tool: 'board', resultEmoji: '🍣', resultName: '寿司' },
+    { ingredients: ['🍚'], tool: 'board', resultEmoji: '🍙', resultName: '饭团' }
+];
+const kitchenRecipeBook = kitchenRecipeConfigs.reduce((acc, recipe) => {
+    const key = `${recipe.tool}::${[...recipe.ingredients].sort().join('|')}`;
+    acc[key] = { emoji: recipe.resultEmoji, name: recipe.resultName };
+    return acc;
+}, {});
+let kitchenCurrentTab = 'staple';
+let kitchenCurrentTool = 'pot';
+let kitchenPotIngredients = [];
+let kitchenCookTimer = null;
+let kitchenLastCookedDish = null;
+let kitchenGiftTargetId = '';
+
+function getKitchenToolName(toolId) {
+    const tool = kitchenTools.find((item) => item.id === toolId);
+    return tool ? tool.name : '锅';
+}
+
+function renderKitchenCurrentTool() {
+    const toolIcon = document.getElementById('kitchen-current-tool-icon');
+    const toolName = document.getElementById('kitchen-current-tool-name');
+    if (toolIcon) toolIcon.innerHTML = kitchenToolIcons[kitchenCurrentTool] || kitchenToolIcons.pot;
+    if (toolName) toolName.textContent = getKitchenToolName(kitchenCurrentTool);
+}
+
+function renderKitchenToolOptions() {
+    const list = document.getElementById('kitchen-tool-option-list');
+    if (!list) return;
+    list.innerHTML = kitchenTools.map((tool) => (
+        `<button class="kitchen-tool-option ${tool.id === kitchenCurrentTool ? 'active' : ''}" type="button" onclick="selectKitchenTool('${tool.id}')"><span class="kitchen-tool-option-icon">${kitchenToolIcons[tool.id] || ''}</span><span class="kitchen-tool-option-name">${tool.name}</span></button>`
+    )).join('');
+}
+
+function openKitchenToolModal() {
+    const modal = document.getElementById('kitchen-tool-modal');
+    if (!modal) return;
+    renderKitchenToolOptions();
+    modal.classList.add('active');
+}
+
+function closeKitchenToolModal() {
+    const modal = document.getElementById('kitchen-tool-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function openKitchenRecipeModal() {
+    const modal = document.getElementById('kitchen-recipe-modal');
+    if (!modal) return;
+    renderKitchenRecipeList();
+    modal.classList.add('active');
+}
+
+function closeKitchenRecipeModal() {
+    const modal = document.getElementById('kitchen-recipe-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function renderKitchenRecipeList() {
+    const list = document.getElementById('kitchen-recipe-list');
+    if (!list) return;
+    list.innerHTML = kitchenRecipeConfigs.map((recipe) => {
+        const ingredientsText = recipe.ingredients
+            .map((emoji) => `${emoji}${kitchenIngredientNames[emoji] || ''}`)
+            .join('＋');
+        const toolText = `（${getKitchenToolName(recipe.tool)}）`;
+        return `<div class="kitchen-recipe-item">${ingredientsText}＋${toolText}＝${recipe.resultEmoji}${recipe.resultName}</div>`;
+    }).join('');
+}
+
+function selectKitchenTool(toolId) {
+    if (!kitchenToolIcons[toolId]) return;
+    kitchenCurrentTool = toolId;
+    renderKitchenCurrentTool();
+    renderKitchenToolOptions();
+    renderKitchenPot();
+    closeKitchenToolModal();
+}
+
+function initKitchenApp() {
+    kitchenCurrentTab = 'staple';
+    kitchenCurrentTool = 'pot';
+    kitchenGiftTargetId = '';
+    kitchenLastCookedDish = null;
+    closeKitchenOverlay();
+    closeKitchenToolModal();
+    closeKitchenRecipeModal();
+    closeKitchenGiftModal();
+    renderKitchenCurrentTool();
+    renderKitchenToolOptions();
+    renderKitchenRecipeList();
+    switchKitchenTab(kitchenCurrentTab);
+    renderKitchenPot();
+}
+
+function switchKitchenTab(category) {
+    kitchenCurrentTab = category;
+    document.querySelectorAll('#app-kitchen .kitchen-tab-btn').forEach((btn) => btn.classList.remove('active'));
+    const activeBtn = document.getElementById(`kitchen-tab-${category}`);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    const grid = document.getElementById('kitchen-shelf-grid');
+    if (!grid) return;
+    const ingredients = kitchenIngredientDB[category] || [];
+    if (ingredients.length === 0) {
+        grid.innerHTML = '<div class="kitchen-empty-shelf">这里空空如也</div>';
+        return;
+    }
+
+    grid.innerHTML = ingredients.map((emoji) => (
+        `<button class="kitchen-ing-item" type="button" title="${kitchenIngredientNames[emoji] || '食材'}" onclick="addToKitchenPot('${emoji}')">${emoji}</button>`
+    )).join('');
+}
+
+function addToKitchenPot(emoji) {
+    if (kitchenPotIngredients.length >= 8) {
+        alert('食材已满，先合成再继续添加。');
+        return;
+    }
+    kitchenPotIngredients.push(emoji);
+    renderKitchenPot();
+}
+
+function removeFromKitchenPot(index) {
+    kitchenPotIngredients.splice(index, 1);
+    renderKitchenPot();
+}
+
+function renderKitchenPot() {
+    const display = document.getElementById('kitchen-pot-display');
+    if (!display) return;
+    if (kitchenPotIngredients.length === 0) {
+        display.innerHTML = `<span class="kitchen-pot-placeholder">点击下方食材加入${getKitchenToolName(kitchenCurrentTool)}</span>`;
+        return;
+    }
+
+    display.innerHTML = kitchenPotIngredients.map((emoji, index) => (
+        `<div class="kitchen-pot-item" onclick="removeFromKitchenPot(${index})">${emoji}</div>`
+    )).join('');
+}
+
+function clearKitchenPot() {
+    kitchenPotIngredients = [];
+    renderKitchenPot();
+}
+
+function getKitchenRecipeKey(ingredients, toolId) {
+    return `${toolId}::${[...ingredients].sort().join('|')}`;
+}
+
+function openKitchenGiftModal() {
+    if (!kitchenLastCookedDish) {
+        alert('请先合成成功一道料理，再赠送给 TA。');
+        return;
+    }
+    const modal = document.getElementById('kitchen-gift-modal');
+    if (!modal) return;
+    kitchenGiftTargetId = '';
+    renderKitchenGiftList();
+    modal.classList.add('active');
+}
+
+function closeKitchenGiftModal() {
+    const modal = document.getElementById('kitchen-gift-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function renderKitchenGiftList() {
+    const list = document.getElementById('kitchen-gift-list');
+    if (!list) return;
+    const contacts = DB.getContacts();
+    if (!contacts.length) {
+        list.innerHTML = '<div class="kitchen-gift-empty">通讯录暂无角色</div>';
+        return;
+    }
+
+    const defaultAvatar = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23d4d4d4%22 width=%22100%22 height=%22100%22/></svg>';
+    list.innerHTML = contacts.map((contact) => `
+        <div class="kitchen-gift-item ${String(kitchenGiftTargetId) === String(contact.id) ? 'active' : ''}" onclick="selectKitchenGiftTarget('${String(contact.id)}')">
+            <img class="kitchen-gift-avatar" src="${contact.avatar || defaultAvatar}" alt="${contact.name}">
+            <div class="kitchen-gift-name">${contact.name}</div>
+            <div class="kitchen-gift-check"></div>
+        </div>
+    `).join('');
+}
+
+function selectKitchenGiftTarget(contactId) {
+    kitchenGiftTargetId = String(contactId);
+    renderKitchenGiftList();
+}
+
+function mapKitchenGiftChatMessage(msg) {
+    if (msg.isRetracted) return '[已撤回消息]';
+    if (msg.type === 'food_gift') {
+        if (msg.isDark) return '[用户向你赠送了黑暗料理。请结合人设自然表达惊讶、吐槽或犹豫。]';
+        return `[用户赠送你食物：${msg.foodEmoji || ''}${msg.foodName || '料理'}]`;
+    }
+    if (msg.type === 'image') return `[图片：${msg.imageDesc || '未描述'}]`;
+    if (msg.type === 'video') return `[视频：${msg.videoDesc || '未描述'}]`;
+    if (msg.type === 'voice') return `[语音：${msg.voiceText || msg.content || ''}]`;
+    if (msg.type === 'sticker') return `[图片表情：${msg.stickerDesc || '表情'}]`;
+    if (msg.type === 'html_theater') return '[HTML 小剧场]';
+    return msg.content || '';
+}
+
+function confirmKitchenGift() {
+    if (!kitchenLastCookedDish) {
+        alert('暂无可赠送的食物。');
+        return;
+    }
+    if (!kitchenGiftTargetId) {
+        alert('请选择一位角色。');
+        return;
+    }
+    const contacts = DB.getContacts();
+    const contact = contacts.find((item) => String(item.id) === String(kitchenGiftTargetId));
+    if (!contact) {
+        alert('角色不存在，请重试。');
+        return;
+    }
+
+    const chats = DB.getChats();
+    if (!chats[contact.id]) chats[contact.id] = [];
+    const isDarkDish = kitchenLastCookedDish.isDark === true;
+    const giftText = isDarkDish
+        ? '向你赠送了黑暗料理...'
+        : `向你赠送了${kitchenLastCookedDish.emoji}${kitchenLastCookedDish.name}`;
+    chats[contact.id].push({
+        role: 'user',
+        type: 'food_gift',
+        foodEmoji: kitchenLastCookedDish.emoji,
+        foodName: kitchenLastCookedDish.name,
+        isDark: isDarkDish,
+        content: giftText,
+        timestamp: Date.now(),
+        mode: 'online'
+    });
+    DB.saveChats(chats);
+
+    closeKitchenGiftModal();
+    closeKitchenOverlay();
+    openApp('app-vk');
+    openChat(contact);
+}
+
+function startKitchenCooking() {
+    if (kitchenPotIngredients.length === 0) {
+        alert('还没有放入食材，先添加一点吧。');
+        return;
+    }
+
+    const overlay = document.getElementById('kitchen-overlay');
+    const loadingState = document.getElementById('kitchen-loading-state');
+    const resultState = document.getElementById('kitchen-result-state');
+    const resultEmoji = document.getElementById('kitchen-result-emoji');
+    const resultText = document.getElementById('kitchen-result-text');
+    if (!overlay || !loadingState || !resultState || !resultEmoji || !resultText) return;
+
+    if (kitchenCookTimer) {
+        clearTimeout(kitchenCookTimer);
+        kitchenCookTimer = null;
+    }
+
+    closeKitchenToolModal();
+    overlay.classList.add('active');
+    loadingState.style.display = 'block';
+    resultState.style.display = 'none';
+
+    kitchenCookTimer = setTimeout(() => {
+        loadingState.style.display = 'none';
+        resultState.style.display = 'block';
+        const recipeKey = getKitchenRecipeKey(kitchenPotIngredients, kitchenCurrentTool);
+        const matchedRecipe = kitchenRecipeBook[recipeKey];
+
+        if (matchedRecipe) {
+            resultEmoji.textContent = matchedRecipe.emoji;
+            resultText.innerHTML = `已成功制作 <b>${matchedRecipe.name}</b>`;
+            kitchenLastCookedDish = { emoji: matchedRecipe.emoji, name: matchedRecipe.name, isDark: false };
+        } else {
+            resultEmoji.textContent = '🤢';
+            resultText.innerHTML = `当前${getKitchenToolName(kitchenCurrentTool)}不适合这份配方，做成了 <b>黑暗料理</b>...`;
+            kitchenLastCookedDish = { emoji: '🤢', name: '黑暗料理', isDark: true };
+        }
+        kitchenCookTimer = null;
+    }, 2000);
+}
+
+function closeKitchenOverlay() {
+    const overlay = document.getElementById('kitchen-overlay');
+    const loadingState = document.getElementById('kitchen-loading-state');
+    const resultState = document.getElementById('kitchen-result-state');
+    if (overlay) overlay.classList.remove('active');
+    if (loadingState) loadingState.style.display = 'block';
+    if (resultState) resultState.style.display = 'none';
+
+    if (kitchenCookTimer) {
+        clearTimeout(kitchenCookTimer);
+        kitchenCookTimer = null;
+    }
+}
+
+function resetKitchenApp() {
+    closeKitchenOverlay();
+    closeKitchenGiftModal();
+    clearKitchenPot();
 }
 
 function showComingSoonNotice() {
@@ -289,6 +646,10 @@ function showComingSoonNotice() {
 function goHome() {
     pauseTomatoRuntime();
     pauseSuikaRuntime();
+    closeKitchenOverlay();
+    closeKitchenToolModal();
+    closeKitchenRecipeModal();
+    closeKitchenGiftModal();
     screens.forEach(s => s.classList.remove('active'));
     document.getElementById('home-screen').classList.add('active');
     document.getElementById('chat-interface').style.display = 'none';
@@ -349,6 +710,9 @@ function closeAllOverlays() {
     if (shoppingGiftModal) shoppingGiftModal.classList.remove('active');
     const shoppingPurchasedView = document.getElementById('shopping-purchased-view');
     if (shoppingPurchasedView) shoppingPurchasedView.classList.remove('active');
+    closeKitchenToolModal();
+    closeKitchenRecipeModal();
+    closeKitchenGiftModal();
 }
 
 const SHORT_TERM_MEMORY_TTL_MS = 72 * 60 * 60 * 1000;
@@ -4298,6 +4662,17 @@ function renderChatHistory(maintainScroll = false) {
                 const icon = accepted ? '✅' : '❌';
                 b.innerHTML = `<div class="transfer-header"><div class="transfer-icon">${icon}</div><div class="transfer-info"><span class="transfer-amount">${title}</span><span class="transfer-status">${escapeHTML(msg.title || '礼物')}</span></div></div><div class="transfer-footer">${accepted ? '谢谢你的心意' : '这次先不收啦'}</div>`;
                 bc.appendChild(b);
+            } else if (msg.type === 'food_gift') {
+                const b = document.createElement('div');
+                const isDarkGift = msg.isDark === true;
+                b.className = `message-bubble transfer-bubble accepted ${isDarkGift ? 'food-gift-dark' : ''}`;
+                const dishEmoji = msg.foodEmoji || '';
+                const dishName = escapeHTML(msg.foodName || '食物');
+                const giftTitle = isDarkGift ? '黑暗料理赠送' : '美食赠送';
+                const giftStatus = isDarkGift ? '黑暗料理' : `${dishEmoji}${dishName}`;
+                const giftFooter = isDarkGift ? '向你赠送了黑暗料理...' : `向你赠送了${dishEmoji}${dishName}`;
+                b.innerHTML = `<div class="transfer-header"><div class="transfer-icon">🍽️</div><div class="transfer-info"><span class="transfer-amount">${giftTitle}</span><span class="transfer-status">${giftStatus}</span></div></div><div class="transfer-footer">${giftFooter}</div>`;
+                bc.appendChild(b);
             } else if (msg.type === 'redpacket') {
                 const b = document.createElement('div');
                 b.className = 'message-bubble redpacket-bubble';
@@ -5617,6 +5992,7 @@ async function triggerAIResponse(options = {}) {
         if (msg.type === 'redpacket') return { role: 'user', content: `[用户给你发送了红包 ¥${msg.amount}，备注：${msg.note || '无'}]` };
         if (msg.type === 'pay_invite_req') return { role: 'user', content: `[用户邀请你代付，金额：${msg.amountText || formatAmountByCurrency(msg.amount, msg.currencyUnit || 'cny')}]` };
         if (msg.type === 'gift_req') return { role: 'user', content: `[用户赠送你礼物：${msg.title || '礼物'}，价值：${msg.amountText || formatAmountByCurrency(msg.amount, msg.currencyUnit || 'cny')}]` };
+        if (msg.type === 'food_gift') return { role: 'user', content: `[用户向你赠送了食物：${msg.foodEmoji || ''}${msg.foodName || '食物'}]` };
         if (msg.type === 'transfer_receipt') return { role: 'assistant', content: msg.status === 'accepted' ? `[我已收款 ¥${msg.amount}]` : `[我已拒收并退还 ¥${msg.amount}]` };
         if (msg.type === 'redpacket_receipt') return { role: 'assistant', content: msg.status === 'accepted' ? `[我已领取红包 ¥${msg.amount}]` : `[我已拒收并退回红包 ¥${msg.amount}]` };
         if (msg.type === 'pay_invite_receipt') return { role: 'assistant', content: msg.status === 'accepted' ? '[我已帮你代付]' : '[我已拒绝你的代付邀请]' };

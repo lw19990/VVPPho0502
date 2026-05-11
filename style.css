@@ -6196,3 +6196,538 @@ input:checked + .slider:before { transform: translateX(22px); }
     padding: 6px 10px;
     cursor: pointer;
 }
+
+/* --- 小厨房 App --- */
+#app-kitchen {
+    background: #fff4e6;
+}
+
+.kitchen-header {
+    background: #fff4e6;
+    border-bottom: 1px solid #ffd7a3;
+}
+
+.kitchen-clear-btn {
+    color: #e67e22;
+    font-size: 14px;
+}
+
+.kitchen-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.kitchen-clear-btn {
+    border: none;
+    border-radius: 10px;
+    background: #fff;
+    padding: 6px 10px;
+    height: auto;
+    line-height: 1.2;
+    font-weight: 600;
+}
+
+.kitchen-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.kitchen-pot-area {
+    height: 230px;
+    background: #ffe0b2;
+    border-bottom: 2px dashed #ffd180;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    position: relative;
+    padding: 10px 12px 14px;
+}
+
+.kitchen-tool-switch-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    border: none;
+    border-radius: 12px;
+    background: #fff;
+    color: #444;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+}
+
+.kitchen-tool-switch-btn:active {
+    transform: scale(0.97);
+}
+
+.kitchen-recipe-float-btn {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    border: none;
+    border-radius: 12px;
+    background: #fff;
+    color: #6a84a8;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+}
+
+.kitchen-recipe-float-btn:active {
+    transform: scale(0.97);
+}
+
+.kitchen-tool-icon-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 120px;
+    width: 100%;
+    color: #705338;
+}
+
+.kitchen-tool-icon {
+    width: 96px;
+    height: 96px;
+}
+
+.kitchen-tool-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.kitchen-tool-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #8b5a2b;
+}
+
+.kitchen-pot-contents {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 12px 0;
+    width: 100%;
+    min-height: 52px;
+}
+
+.kitchen-pot-placeholder {
+    font-size: 14px;
+    color: #9a846a;
+}
+
+.kitchen-pot-item {
+    font-size: 32px;
+    cursor: pointer;
+    animation: kitchen-drop-in 0.25s ease;
+}
+
+@keyframes kitchen-drop-in {
+    from {
+        transform: translateY(-18px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.kitchen-cook-btn {
+    margin: 14px 15px;
+    height: 46px;
+    border: none;
+    border-radius: 12px;
+    background: #ff9f43;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: 0 4px #e67e22;
+    cursor: pointer;
+}
+
+.kitchen-cook-btn:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px #e67e22;
+}
+
+.kitchen-shelf-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+}
+
+.kitchen-category-tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    background: #f0f0f0;
+    padding: 6px;
+}
+
+.kitchen-tab-btn {
+    flex: 1;
+    min-width: 62px;
+    border: none;
+    border-radius: 8px;
+    background: #e0e0e0;
+    color: #555;
+    font-size: 13px;
+    padding: 8px 6px;
+    cursor: pointer;
+}
+
+.kitchen-tab-btn.active {
+    background: #ff9f43;
+    color: #fff;
+}
+
+.kitchen-ingredient-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    align-content: start;
+}
+
+.kitchen-empty-shelf {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: #c2c2c2;
+    font-size: 14px;
+    padding-top: 8px;
+}
+
+.kitchen-ing-item {
+    border: none;
+    background: #f9f9f9;
+    border-radius: 10px;
+    font-size: 34px;
+    padding: 6px 0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+}
+
+.kitchen-ing-item:active {
+    transform: scale(0.92);
+}
+
+.kitchen-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 780;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.86);
+    color: #fff;
+}
+
+.kitchen-overlay.active {
+    display: flex;
+}
+
+.kitchen-loading-state {
+    text-align: center;
+}
+
+.kitchen-loading-spinner {
+    font-size: 42px;
+    margin-bottom: 16px;
+    animation: kitchen-spin 1s linear infinite;
+}
+
+@keyframes kitchen-spin {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.kitchen-loading-title {
+    font-size: 20px;
+}
+
+.kitchen-loading-desc {
+    margin-top: 10px;
+    color: #c9c9c9;
+    font-size: 12px;
+}
+
+.kitchen-result-state {
+    text-align: center;
+    display: none;
+    animation: kitchen-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.2);
+}
+
+@keyframes kitchen-pop {
+    from {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.kitchen-result-title {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.kitchen-result-emoji {
+    font-size: 96px;
+    margin: 14px 0;
+}
+
+.kitchen-result-text {
+    font-size: 18px;
+}
+
+.kitchen-reset-btn {
+    margin-top: 24px;
+    border: none;
+    border-radius: 999px;
+    background: #fff;
+    color: #ff9f43;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 10px 24px;
+    cursor: pointer;
+}
+
+.kitchen-gift-btn {
+    margin-top: 16px;
+    border: none;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #5f7da2;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 22px;
+    cursor: pointer;
+}
+
+.kitchen-tool-modal {
+    position: absolute;
+    inset: 0;
+    z-index: 782;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.24);
+    animation: kitchen-fade-in 0.2s ease;
+}
+
+.kitchen-tool-modal.active {
+    display: flex;
+}
+
+@keyframes kitchen-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.kitchen-tool-modal-card {
+    width: min(320px, 88%);
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px 14px 12px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+}
+
+.kitchen-recipe-modal-card {
+    width: min(358px, 92%);
+    max-height: 78%;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+}
+
+.kitchen-recipe-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kitchen-recipe-item {
+    border: 1px solid #f0e5d8;
+    border-radius: 10px;
+    background: #fffaf4;
+    padding: 10px;
+    color: #6a543f;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.kitchen-gift-modal-card {
+    width: min(336px, 90%);
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+}
+
+.kitchen-gift-list {
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.kitchen-gift-empty {
+    color: #999;
+    font-size: 13px;
+    text-align: center;
+    padding: 18px 4px;
+}
+
+.kitchen-gift-item {
+    border: 1px solid #ececec;
+    border-radius: 12px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    cursor: pointer;
+}
+
+.kitchen-gift-item.active {
+    border-color: #ff9f43;
+    background: #fff8ef;
+}
+
+.kitchen-gift-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.kitchen-gift-name {
+    flex: 1;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.kitchen-gift-check {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #d0d0d0;
+}
+
+.kitchen-gift-item.active .kitchen-gift-check {
+    border-color: #ff9f43;
+    background: #ff9f43;
+}
+
+.kitchen-gift-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.kitchen-gift-cancel,
+.kitchen-gift-confirm {
+    flex: 1;
+    border: none;
+    border-radius: 10px;
+    height: 40px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.kitchen-gift-cancel {
+    background: #ececec;
+    color: #444;
+}
+
+.kitchen-gift-confirm {
+    background: #ff9f43;
+    color: #fff;
+}
+
+.message-bubble.transfer-bubble.food-gift-dark {
+    background: linear-gradient(135deg, #5b2a86 0%, #3f1a62 100%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.message-bubble.transfer-bubble.food-gift-dark .transfer-amount,
+.message-bubble.transfer-bubble.food-gift-dark .transfer-status,
+.message-bubble.transfer-bubble.food-gift-dark .transfer-footer {
+    color: #f7edff;
+}
+
+.kitchen-tool-modal-title {
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 10px;
+}
+
+.kitchen-tool-option-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.kitchen-tool-option {
+    border: 1px solid #ececec;
+    border-radius: 12px;
+    background: #fff;
+    height: 92px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    color: #6d6d6d;
+}
+
+.kitchen-tool-option.active {
+    border-color: #ff9f43;
+    background: #fff6eb;
+    color: #e67e22;
+}
+
+.kitchen-tool-option-icon {
+    width: 42px;
+    height: 42px;
+}
+
+.kitchen-tool-option-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.kitchen-tool-option-name {
+    font-size: 12px;
+    font-weight: 700;
+}
