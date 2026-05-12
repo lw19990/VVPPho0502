@@ -23,7 +23,8 @@ const MEMORY_CACHE = {
     iphone_game_data: null,
     iphone_user_accounts: null,
     iphone_wallet_data: null,
-    iphone_shopping_data: null
+    iphone_shopping_data: null,
+    iphone_accounting_data: null
 };
 
 // 初始化数据库
@@ -210,6 +211,9 @@ function openApp(appId) {
         pauseSuikaRuntime();
         closeSuikaSettings();
     }
+    if (appId !== 'app-tarot') {
+        pauseTarotRuntime();
+    }
     screens.forEach(s => s.classList.remove('active'));
     document.getElementById(appId).classList.add('active');
     if(appId === 'app-contacts') renderContactsPanel();
@@ -224,8 +228,10 @@ function openApp(appId) {
     if(appId === 'app-tomato') initTomatoApp();
     if(appId === 'app-game') initSuikaApp();
     if(appId === 'app-wallet') initWalletApp();
+    if(appId === 'app-accounting') initAccountingApp();
     if(appId === 'app-shopping') renderShoppingApp();
     if(appId === 'app-kitchen') initKitchenApp();
+    if(appId === 'app-tarot') initTarotApp();
 }
 
 const kitchenToolIcons = {
@@ -646,6 +652,7 @@ function showComingSoonNotice() {
 function goHome() {
     pauseTomatoRuntime();
     pauseSuikaRuntime();
+    pauseTarotRuntime();
     closeKitchenOverlay();
     closeKitchenToolModal();
     closeKitchenRecipeModal();
@@ -692,6 +699,11 @@ function closeAllOverlays() {
     if (widgetModal) widgetModal.classList.remove('active');
     const walletModal = document.getElementById('wallet-action-modal');
     if (walletModal) walletModal.classList.remove('active');
+    const accountingBalanceModal = document.getElementById('accounting-balance-modal');
+    if (accountingBalanceModal) accountingBalanceModal.classList.remove('active');
+    const accountingRoleModal = document.getElementById('accounting-role-modal');
+    if (accountingRoleModal) accountingRoleModal.classList.remove('active');
+    if (typeof closeAccountingDetailView === 'function') closeAccountingDetailView();
     const shoppingEntryModal = document.getElementById('shopping-entry-modal');
     if (shoppingEntryModal) shoppingEntryModal.classList.remove('active');
     const shoppingRoleModal = document.getElementById('shopping-role-modal');
@@ -993,6 +1005,23 @@ const DB = {
     saveShoppingData: (data) => {
         MEMORY_CACHE['iphone_shopping_data'] = data;
         saveToIndexedDB('iphone_shopping_data', data);
+    },
+    getAccountingData: () => {
+        const saved = MEMORY_CACHE['iphone_accounting_data'];
+        if (!saved || typeof saved !== 'object') {
+            return { selectedRoleIds: [], balance: 0, records: [], messages: [], currentType: 'expense' };
+        }
+        return {
+            selectedRoleIds: Array.isArray(saved.selectedRoleIds) ? saved.selectedRoleIds.map(String) : [],
+            balance: Number.isFinite(Number(saved.balance)) ? Number(saved.balance) : 0,
+            records: Array.isArray(saved.records) ? saved.records : [],
+            messages: Array.isArray(saved.messages) ? saved.messages : [],
+            currentType: saved.currentType === 'income' ? 'income' : 'expense'
+        };
+    },
+    saveAccountingData: (data) => {
+        MEMORY_CACHE['iphone_accounting_data'] = data;
+        saveToIndexedDB('iphone_accounting_data', data);
     }
 };
 
@@ -4143,6 +4172,387 @@ function initWalletApp() {
     closeWalletDetailView();
     closeWalletActionModal();
     renderWalletApp();
+}
+function normalizeAccountingData(raw) {
+    const base = raw && typeof raw === 'object' ? raw : {};
+    const selectedRoleIds = Array.isArray(base.selectedRoleIds) ? base.selectedRoleIds.map(String) : [];
+    const balance = Number(base.balance);
+    const sourceRecords = Array.isArray(base.records) ? base.records : [];
+    const records = sourceRecords
+        .map((item, index) => {
+            const amount = Number(item?.amount);
+            const balanceAfter = Number(item?.balanceAfter);
+            const timestamp = Number(item?.timestamp) || Date.now();
+            const type = item?.type === 'income' ? 'income' : 'expense';
+            return {
+                id: item?.id || `accounting_record_${timestamp}_${index}`,
+                type,
+                feature: String(item?.feature || (type === 'income' ? '记账收入' : '记账支出')),
+                amount: Number.isFinite(amount) ? amount : 0,
+                balanceAfter: Number.isFinite(balanceAfter) ? balanceAfter : 0,
+                timestamp
+            };
+        })
+        .filter(item => item.amount > 0);
+    const sourceMessages = Array.isArray(base.messages) ? base.messages : [];
+    const messages = sourceMessages
+        .map((item, index) => {
+            const role = item?.role === 'assistant' ? 'assistant' : 'user';
+            const content = String(item?.content || '').trim();
+            if (!content) return null;
+            return {
+                id: String(item?.id || `accounting_msg_${Date.now()}_${index}`),
+                role,
+                content,
+                contactId: item?.contactId ? String(item.contactId) : '',
+                name: String(item?.name || (role === 'assistant' ? '记账搭子' : '我')),
+                timestamp: Number(item?.timestamp) || Date.now()
+            };
+        })
+        .filter(Boolean);
+    const currentType = base.currentType === 'income' ? 'income' : 'expense';
+    return {
+        selectedRoleIds,
+        balance: Number.isFinite(balance) ? balance : 0,
+        records,
+        messages,
+        currentType
+    };
+}
+function getAccountingData() {
+    return normalizeAccountingData(DB.getAccountingData());
+}
+function saveAccountingData(data) {
+    DB.saveAccountingData(normalizeAccountingData(data));
+}
+function formatAccountingCurrency(amount) {
+    return `¥${Number(amount || 0).toFixed(2)}`;
+}
+function getAccountingMonthLabel(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}年${d.getMonth() + 1}月`;
+}
+function appendAccountingRecord(type, feature, amount, balanceAfter) {
+    const data = getAccountingData();
+    data.records.push({
+        id: `accounting_record_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: type === 'income' ? 'income' : 'expense',
+        feature: String(feature || (type === 'income' ? '记账收入' : '记账支出')),
+        amount: Number(amount),
+        balanceAfter: Number(balanceAfter),
+        timestamp: Date.now()
+    });
+    saveAccountingData(data);
+}
+function increaseAccountingBalance(amount, feature = '记账收入') {
+    const data = getAccountingData();
+    const safeAmount = Number(amount);
+    if (!Number.isFinite(safeAmount) || safeAmount <= 0) return false;
+    data.balance = Number((data.balance + safeAmount).toFixed(2));
+    saveAccountingData(data);
+    appendAccountingRecord('income', feature, safeAmount, data.balance);
+    return true;
+}
+function spendAccountingBalance(amount, feature = '记账支出') {
+    const data = getAccountingData();
+    const safeAmount = Number(amount);
+    if (!Number.isFinite(safeAmount) || safeAmount <= 0) return false;
+    if (data.balance < safeAmount) return false;
+    data.balance = Number((data.balance - safeAmount).toFixed(2));
+    saveAccountingData(data);
+    appendAccountingRecord('expense', feature, safeAmount, data.balance);
+    return true;
+}
+function updateAccountingTypeToggle() {
+    const btn = document.getElementById('accounting-type-toggle');
+    if (!btn) return;
+    const data = getAccountingData();
+    btn.innerText = data.currentType === 'income' ? '收入' : '支出';
+}
+function formatAccountingYuan(value) {
+    const amount = Number(value) || 0;
+    if (Number.isInteger(amount)) return String(amount);
+    return amount.toFixed(2);
+}
+function renderAccountingStats() {
+    const el = document.getElementById('accounting-chat-stats');
+    if (!el) return;
+    const data = getAccountingData();
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let income = 0;
+    let expense = 0;
+    data.records.forEach((record) => {
+        const d = new Date(record.timestamp);
+        if (d.getFullYear() !== y || d.getMonth() !== m) return;
+        if (record.type === 'income') income += Number(record.amount) || 0;
+        else expense += Number(record.amount) || 0;
+    });
+    const monthText = now.toLocaleDateString('zh-CN', { month: 'long' });
+    el.innerText = `${monthText} 支出${formatAccountingYuan(expense)}元 收入${formatAccountingYuan(income)}元`;
+}
+function renderAccountingBalance() {
+    const el = document.getElementById('accounting-balance-amount');
+    if (!el) return;
+    el.innerText = formatAccountingCurrency(getAccountingData().balance);
+}
+function renderAccountingDetailList() {
+    const list = document.getElementById('accounting-detail-list');
+    if (!list) return;
+    const data = getAccountingData();
+    const sorted = [...data.records].sort((a, b) => b.timestamp - a.timestamp);
+    if (sorted.length === 0) {
+        list.innerHTML = '<div class="wallet-empty-record">暂无收支记录</div>';
+        return;
+    }
+    const monthMap = {};
+    sorted.forEach(record => {
+        const month = getAccountingMonthLabel(record.timestamp);
+        if (!monthMap[month]) monthMap[month] = [];
+        monthMap[month].push(record);
+    });
+    const monthHtml = Object.keys(monthMap).map(month => {
+        const rows = monthMap[month].map(record => {
+            const isIncome = record.type === 'income';
+            const changeClass = isIncome ? 'income' : 'expense';
+            const changeSign = isIncome ? '+' : '-';
+            return `<div class="wallet-record-item"><div class="wallet-record-left"><div class="wallet-record-feature">${escapeHtml(record.feature)}</div><div class="wallet-record-time">${formatWalletRecordTime(record.timestamp)}</div></div><div class="wallet-record-right"><div class="wallet-record-change ${changeClass}">${changeSign}${formatAccountingCurrency(record.amount)}</div><div class="wallet-record-balance">余额 ${formatAccountingCurrency(record.balanceAfter)}</div></div></div>`;
+        }).join('');
+        return `<div class="wallet-month-card"><div class="wallet-month-title">${month}</div>${rows}</div>`;
+    }).join('');
+    list.innerHTML = monthHtml;
+}
+function openAccountingDetailView() {
+    const view = document.getElementById('accounting-detail-view');
+    if (!view) return;
+    renderAccountingDetailList();
+    view.classList.add('active');
+}
+function closeAccountingDetailView() {
+    const view = document.getElementById('accounting-detail-view');
+    if (!view) return;
+    view.classList.remove('active');
+}
+function switchAccountingTab(tab) {
+    const isBalance = tab !== 'chat';
+    const balanceView = document.getElementById('accounting-balance-view');
+    const chatView = document.getElementById('accounting-chat-view');
+    const tabBalance = document.getElementById('accounting-tab-balance');
+    const tabChat = document.getElementById('accounting-tab-chat');
+    if (balanceView) balanceView.classList.toggle('active', isBalance);
+    if (chatView) chatView.classList.toggle('active', !isBalance);
+    if (tabBalance) tabBalance.classList.toggle('active', isBalance);
+    if (tabChat) tabChat.classList.toggle('active', !isBalance);
+    if (!isBalance) closeAccountingDetailView();
+}
+function openAccountingBalanceModal() {
+    const modal = document.getElementById('accounting-balance-modal');
+    const input = document.getElementById('accounting-balance-input');
+    if (!modal || !input) return;
+    input.value = Number(getAccountingData().balance).toFixed(2);
+    modal.classList.add('active');
+    setTimeout(() => input.focus(), 0);
+}
+function closeAccountingBalanceModal(event) {
+    if (event && event.target && event.target.id !== 'accounting-balance-modal') return;
+    const modal = document.getElementById('accounting-balance-modal');
+    if (modal) modal.classList.remove('active');
+}
+function confirmAccountingBalance() {
+    const input = document.getElementById('accounting-balance-input');
+    if (!input) return;
+    const amount = Number(input.value);
+    if (!Number.isFinite(amount) || amount < 0) return alert('请输入有效余额');
+    const data = getAccountingData();
+    data.balance = Number(amount.toFixed(2));
+    saveAccountingData(data);
+    renderAccountingBalance();
+    renderAccountingDetailList();
+    closeAccountingBalanceModal();
+}
+function renderAccountingRoleList() {
+    const list = document.getElementById('accounting-role-list');
+    if (!list) return;
+    const contacts = DB.getContacts();
+    const selectedSet = new Set(getAccountingData().selectedRoleIds);
+    if (contacts.length === 0) {
+        list.innerHTML = '<div class="accounting-empty">通讯录暂无角色，请先去通讯录添加。</div>';
+        return;
+    }
+    list.innerHTML = contacts.map((contact) => {
+        const cid = String(contact.id);
+        const checked = selectedSet.has(cid) ? 'checked' : '';
+        return `<label class="accounting-role-item"><input type="checkbox" value="${escapeHtml(cid)}" ${checked}><span>${escapeHtml(contact.name || '未命名角色')}</span></label>`;
+    }).join('');
+}
+function openAccountingRoleModal() {
+    const modal = document.getElementById('accounting-role-modal');
+    if (!modal) return;
+    renderAccountingRoleList();
+    modal.classList.add('active');
+}
+function closeAccountingRoleModal(event) {
+    if (event && event.target && event.target.id !== 'accounting-role-modal') return;
+    const modal = document.getElementById('accounting-role-modal');
+    if (modal) modal.classList.remove('active');
+}
+function saveAccountingRoleSelection() {
+    const data = getAccountingData();
+    const checked = [...document.querySelectorAll('#accounting-role-list input:checked')].map((el) => String(el.value));
+    data.selectedRoleIds = checked;
+    saveAccountingData(data);
+    closeAccountingRoleModal();
+}
+function appendAccountingMessage(role, content, extra = {}) {
+    const data = getAccountingData();
+    data.messages.push({
+        id: `accounting_msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        role: role === 'assistant' ? 'assistant' : 'user',
+        content: String(content || ''),
+        contactId: extra.contactId ? String(extra.contactId) : '',
+        name: String(extra.name || (role === 'assistant' ? '记账搭子' : '我')),
+        timestamp: Date.now()
+    });
+    saveAccountingData(data);
+}
+function renderAccountingHistory() {
+    const wrap = document.getElementById('accounting-chat-history');
+    if (!wrap) return;
+    const messages = getAccountingData().messages;
+    if (messages.length === 0) {
+        wrap.innerHTML = '<div class="wallet-empty-record">开始记一笔吧</div>';
+        return;
+    }
+    wrap.innerHTML = messages.map((msg) => {
+        const roleClass = msg.role === 'assistant' ? 'ai' : 'user';
+        const metaText = msg.role === 'assistant' ? escapeHtml(msg.name || '记账搭子') : '我';
+        return `<div class="message-row ${roleClass}"><div class="bubble-container"><div class="message-bubble ${roleClass}">${escapeHtml(msg.content)}</div><div class="accounting-message-meta">${metaText}</div></div></div>`;
+    }).join('');
+    wrap.scrollTop = wrap.scrollHeight;
+}
+function toggleAccountingType() {
+    const data = getAccountingData();
+    data.currentType = data.currentType === 'income' ? 'expense' : 'income';
+    saveAccountingData(data);
+    updateAccountingTypeToggle();
+}
+function handleAccountingEnter(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submitAccountingEntry();
+}
+async function submitAccountingEntry() {
+    const itemInput = document.getElementById('accounting-item-input');
+    const amountInput = document.getElementById('accounting-amount-input');
+    if (!itemInput || !amountInput) return;
+    const item = itemInput.value.trim();
+    const amount = Number(amountInput.value);
+    if (!item) return alert('请输入本次消费/收入内容');
+    if (!Number.isFinite(amount) || amount <= 0) return alert('请输入有效金额');
+    const data = getAccountingData();
+    const isIncome = data.currentType === 'income';
+    const signedText = `${item} ${isIncome ? '+' : '-'}${amount.toFixed(2)}`;
+    if (isIncome) {
+        if (!increaseAccountingBalance(amount, item)) return alert('收入记账失败');
+    } else {
+        if (!spendAccountingBalance(amount, item)) return alert('余额不足，无法记录支出');
+    }
+    appendAccountingMessage('user', signedText, { name: '我' });
+    itemInput.value = '';
+    amountInput.value = '';
+    renderAccountingBalance();
+    renderAccountingStats();
+    renderAccountingDetailList();
+    renderAccountingHistory();
+    await triggerAccountingRoleReplies({
+        raw: signedText,
+        item,
+        amount,
+        isIncome
+    });
+}
+async function requestAccountingReplyForRole(contact, payload, settings) {
+    const itemName = String(payload?.item || '').trim() || '记账项目';
+    const amountRmb = Number(payload?.amount) || 0;
+    const isIncome = payload?.isIncome === true;
+    const userMessage = String(payload?.raw || '').trim();
+    const currencyCode = contact?.userSettings?.currencyUnit || 'cny';
+    const currencyCfg = getCurrencyConfigByCode(currencyCode);
+    const convertedAmountText = formatAmountByCurrency(amountRmb, currencyCode);
+    const signedAmountText = `${isIncome ? '+' : '-'}${amountRmb.toFixed(2)}`;
+
+    const account = getUserAccountById(contact.userAccountId);
+    let systemContent = `${settings.prompt}\n\n[角色信息]\n名字：${contact.name}\n人设：${contact.persona || ''}`;
+    if (account) {
+        systemContent += `\n\n[记账用户信息]\n名字：${account.name || '我'}\n人设：${account.persona || ''}`;
+    }
+    systemContent += `\n\n[记账货币换算参考]\n用户记账默认货币是人民币。\n本次记账：${itemName} ${signedAmountText}（人民币¥）\n按照你的货币单位（${currencyCfg.label}）固定汇率折算，约为：${isIncome ? '+' : '-'}${convertedAmountText}\n请以折算后的金额感知消费水平，避免把正常金额误判为天价。`;
+    systemContent += '\n\n你是陪我记账的角色。你只需要围绕这条记账消息简短回复，内容可关心、吐槽或提醒，禁止扩展到无关话题。回复100字以内，不要和其他角色互动。';
+    const response = await fetch(`${settings.url}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.key}`
+        },
+        body: JSON.stringify({
+            model: settings.model,
+            temperature: settings.temperature !== undefined ? settings.temperature : 0.7,
+            messages: [
+                { role: 'system', content: systemContent },
+                { role: 'user', content: `我刚记了一笔账：${userMessage}` }
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const extracted = extractThoughtAndBody(content);
+    const first = String(extracted.content || content).split('|||')[0].trim();
+    return first || '收到这笔记账了';
+}
+async function triggerAccountingRoleReplies(payload) {
+    const data = getAccountingData();
+    if (!Array.isArray(data.selectedRoleIds) || data.selectedRoleIds.length === 0) return;
+    const settings = DB.getSettings();
+    if (!settings.key) return alert('请先在设置中配置 API Key');
+    const contacts = DB.getContacts();
+    const targets = data.selectedRoleIds
+        .map((id) => contacts.find((item) => String(item.id) === String(id)))
+        .filter(Boolean);
+    if (targets.length === 0) return;
+    const typing = document.getElementById('accounting-typing-indicator');
+    if (typing) typing.style.display = 'block';
+    const results = await Promise.all(targets.map(async (contact) => {
+        try {
+            const reply = await requestAccountingReplyForRole(contact, payload, settings);
+            return { ok: true, contact, reply };
+        } catch (error) {
+            return { ok: false, contact, error };
+        }
+    }));
+    if (typing) typing.style.display = 'none';
+    let okCount = 0;
+    results.forEach((result) => {
+        if (!result.ok) return;
+        okCount += 1;
+        appendAccountingMessage('assistant', result.reply, { contactId: result.contact.id, name: result.contact.name || '记账搭子' });
+    });
+    renderAccountingHistory();
+    if (okCount === 0) alert('角色回复失败，请检查模型配置或网络');
+}
+function initAccountingApp() {
+    switchAccountingTab('balance');
+    closeAccountingDetailView();
+    updateAccountingTypeToggle();
+    renderAccountingBalance();
+    renderAccountingStats();
+    renderAccountingDetailList();
+    renderAccountingHistory();
+    const typing = document.getElementById('accounting-typing-indicator');
+    if (typing) typing.style.display = 'none';
 }
 function openTransferModal() {
     document.getElementById('transfer-modal').classList.add('active');
@@ -8327,18 +8737,495 @@ let currentForumTab = 'following';
 let currentEditingPostId = null;
 let isForumDeleteMode = false;
 let selectedForumPostIds = new Set();
+let currentForumView = 'home';
+let currentForumAccountId = '';
+let currentForumProfileSection = 'posts';
+let forumDraftTags = [];
+const forumFabState = {
+    inited: false,
+    pointerId: null,
+    moved: false,
+    downX: 0,
+    downY: 0,
+    startLeft: 0,
+    startTop: 0
+};
+
+function parseForumPostRange(minRaw, maxRaw, defaultMin = 5, defaultMax = 10) {
+    let min = parseInt(minRaw, 10);
+    let max = parseInt(maxRaw, 10);
+    if (!Number.isFinite(min) || min < 1) min = defaultMin;
+    if (!Number.isFinite(max) || max < 1) max = defaultMax;
+    if (min > max) [min, max] = [max, min];
+    return { min, max };
+}
+
+function normalizeForumSettings(rawSettings) {
+    const settings = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+    const characterRange = parseForumPostRange(settings.characterPostMin, settings.characterPostMax, 5, 10);
+    const npcRange = parseForumPostRange(settings.npcPostMin, settings.npcPostMax, 5, 10);
+    const roleLocalWorldBooks = {};
+    if (settings.roleLocalWorldBooks && typeof settings.roleLocalWorldBooks === 'object') {
+        Object.entries(settings.roleLocalWorldBooks).forEach(([contactId, ids]) => {
+            const normalizedIds = Array.isArray(ids) ? ids.map(id => String(id)) : [];
+            roleLocalWorldBooks[String(contactId)] = Array.from(new Set(normalizedIds));
+        });
+    }
+    return {
+        systemPrompt: typeof settings.systemPrompt === 'string' ? settings.systemPrompt : '',
+        characterPostMin: characterRange.min,
+        characterPostMax: characterRange.max,
+        npcPostMin: npcRange.min,
+        npcPostMax: npcRange.max,
+        useGlobalWorldBook: settings.useGlobalWorldBook !== false,
+        roleLocalWorldBooks
+    };
+}
+
+function normalizeForumData(raw) {
+    const accounts = DB.getUserAccounts();
+    const fallbackAccountId = accounts[0]?.id || '';
+    const data = raw && typeof raw === 'object' ? raw : {};
+    const normalized = {
+        settings: normalizeForumSettings(data.settings),
+        mainAccountId: typeof data.mainAccountId === 'string' ? data.mainAccountId : '',
+        accountData: {}
+    };
+
+    if (data.accountData && typeof data.accountData === 'object') {
+        Object.entries(data.accountData).forEach(([accountId, accountData]) => {
+            const posts = Array.isArray(accountData?.posts) ? accountData.posts : [];
+            const likedPosts = Array.isArray(accountData?.likedPosts) ? accountData.likedPosts : [];
+            const profile = accountData?.profile && typeof accountData.profile === 'object' ? accountData.profile : {};
+            normalized.accountData[accountId] = {
+                posts,
+                likedPosts,
+                profile: {
+                    wallpaper: typeof profile.wallpaper === 'string' ? profile.wallpaper : ''
+                },
+                fabPos: (accountData?.fabPos && typeof accountData.fabPos === 'object') ? accountData.fabPos : null
+            };
+        });
+    }
+
+    // 兼容旧版：把全局帖子迁移到主账号桶
+    if (Array.isArray(data.posts) && data.posts.length > 0) {
+        const targetAccountId = normalized.mainAccountId || fallbackAccountId;
+        if (targetAccountId) {
+            if (!normalized.accountData[targetAccountId]) {
+                normalized.accountData[targetAccountId] = { posts: [], likedPosts: [], profile: { wallpaper: '' }, fabPos: null };
+            }
+            const migratedPosts = data.posts.map(post => ({
+                ...post,
+                accountId: targetAccountId
+            }));
+            normalized.accountData[targetAccountId].posts.push(...migratedPosts);
+        }
+    }
+
+    return normalized;
+}
+
+function getForumBoundContacts(accountId) {
+    if (!accountId) return [];
+    return DB.getContacts().filter(contact => String(contact.userAccountId || '') === String(accountId));
+}
 
 // 获取论坛数据
 DB.getForumData = () => {
     const theme = DB.getTheme();
-    return theme.forumData || { settings: { systemPrompt: '' }, posts: [] };
+    return normalizeForumData(theme.forumData || {});
 };
 
 DB.saveForumData = (data) => {
     const theme = DB.getTheme();
-    theme.forumData = data;
+    theme.forumData = normalizeForumData(data || {});
     DB.saveTheme(theme);
 };
+
+function getForumAccountBucket(forumData, accountId, createIfMissing = true) {
+    if (!forumData.accountData) forumData.accountData = {};
+    if (!accountId) return { posts: [], likedPosts: [], profile: { wallpaper: '' }, fabPos: null };
+    if (!forumData.accountData[accountId] && createIfMissing) {
+        forumData.accountData[accountId] = { posts: [], likedPosts: [], profile: { wallpaper: '' }, fabPos: null };
+    }
+    const bucket = forumData.accountData[accountId] || { posts: [], likedPosts: [], profile: { wallpaper: '' }, fabPos: null };
+    if (!Array.isArray(bucket.posts)) bucket.posts = [];
+    if (!Array.isArray(bucket.likedPosts)) bucket.likedPosts = [];
+    if (!bucket.profile || typeof bucket.profile !== 'object') bucket.profile = { wallpaper: '' };
+    if (typeof bucket.profile.wallpaper !== 'string') bucket.profile.wallpaper = '';
+    if (!bucket.fabPos || typeof bucket.fabPos !== 'object') bucket.fabPos = null;
+    return bucket;
+}
+
+function getForumCurrentAccount() {
+    if (!currentForumAccountId) return null;
+    return getUserAccountById(currentForumAccountId);
+}
+
+function buildForumAccountAvatar(account) {
+    return account?.avatar || DEFAULT_USER_ACCOUNT_PREVIEW_AVATAR;
+}
+
+function buildForumAccountListItem(account, isActive = false) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `forum-account-item${isActive ? ' active' : ''}`;
+    btn.innerHTML = `
+        <img class="forum-account-item-avatar" src="${buildForumAccountAvatar(account)}" alt="头像">
+        <div>
+            <div class="forum-account-item-name">${account.name || '我'}</div>
+            <div class="forum-account-item-persona">${account.persona || '未设置人设'}</div>
+        </div>
+    `;
+    return btn;
+}
+
+function setForumMainAccount(accountId) {
+    const forumData = DB.getForumData();
+    forumData.mainAccountId = accountId;
+    getForumAccountBucket(forumData, accountId, true);
+    DB.saveForumData(forumData);
+    currentForumAccountId = accountId;
+    applyForumFabPositionFromData();
+}
+
+function openForumAccountRequiredModal() {
+    const modal = document.getElementById('forum-account-required-modal');
+    const list = document.getElementById('forum-account-required-list');
+    if (!modal || !list) return;
+
+    const accounts = DB.getUserAccounts();
+    list.innerHTML = '';
+    if (accounts.length === 0) {
+        list.innerHTML = '<div style="font-size:13px; color:#666;">请先在通讯录创建用户人设。</div>';
+        modal.classList.add('active');
+        return;
+    }
+
+    accounts.forEach(account => {
+        const item = buildForumAccountListItem(account, false);
+        item.onclick = () => {
+            setForumMainAccount(account.id);
+            modal.classList.remove('active');
+            renderForumByCurrentView();
+        };
+        list.appendChild(item);
+    });
+
+    modal.classList.add('active');
+}
+
+function openForumAccountSwitchModal() {
+    const modal = document.getElementById('forum-account-switch-modal');
+    const list = document.getElementById('forum-account-switch-list');
+    if (!modal || !list) return;
+
+    const accounts = DB.getUserAccounts();
+    list.innerHTML = '';
+    accounts.forEach(account => {
+        const item = buildForumAccountListItem(account, account.id === currentForumAccountId);
+        item.onclick = () => {
+            setForumMainAccount(account.id);
+            closeForumAccountSwitchModal();
+            renderForumByCurrentView();
+        };
+        list.appendChild(item);
+    });
+    modal.classList.add('active');
+}
+
+function closeForumAccountSwitchModal() {
+    const modal = document.getElementById('forum-account-switch-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function ensureForumMainAccountSelected() {
+    const accounts = DB.getUserAccounts();
+    if (accounts.length === 0) {
+        alert('请先在通讯录创建至少一个用户人设账号');
+        goHome();
+        return false;
+    }
+
+    const forumData = DB.getForumData();
+    const hasValidMain = !!forumData.mainAccountId && !!getUserAccountById(forumData.mainAccountId);
+    if (!hasValidMain) {
+        currentForumAccountId = '';
+        openForumAccountRequiredModal();
+        return false;
+    }
+
+    currentForumAccountId = forumData.mainAccountId;
+    return true;
+}
+
+function initForumApp() {
+    if (!ensureForumMainAccountSelected()) return;
+    initForumFab();
+    applyForumFabPositionFromData();
+    switchForumView(currentForumView);
+    renderForumPosts();
+    renderForumProfileView();
+}
+
+function renderForumDraftTags() {
+    const list = document.getElementById('forum-selected-tag-list');
+    if (!list) return;
+    list.innerHTML = '';
+    forumDraftTags.forEach(tag => {
+        const item = document.createElement('span');
+        item.className = 'forum-selected-tag-item';
+        item.textContent = `#${tag}`;
+        item.title = '点击移除';
+        item.onclick = () => removeForumDraftTag(tag);
+        list.appendChild(item);
+    });
+}
+
+function addForumDraftTag(rawTag) {
+    const normalized = String(rawTag || '').trim().replace(/^#+/, '').slice(0, 20);
+    if (!normalized) return;
+    if (forumDraftTags.includes(normalized)) return;
+    if (forumDraftTags.length >= 8) {
+        alert('一个帖子最多只能带 8 个标签');
+        return;
+    }
+    forumDraftTags.push(normalized);
+    renderForumDraftTags();
+}
+
+function removeForumDraftTag(tag) {
+    forumDraftTags = forumDraftTags.filter(item => item !== tag);
+    renderForumDraftTags();
+}
+
+function addForumDraftTagFromInput() {
+    const input = document.getElementById('forum-create-tag-input');
+    if (!input) return;
+    addForumDraftTag(input.value);
+    input.value = '';
+}
+
+function handleForumTagInputKeydown(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    addForumDraftTagFromInput();
+}
+
+function openForumCreatePostModal() {
+    if (!ensureForumMainAccountSelected()) return;
+    forumDraftTags = [];
+    const textInput = document.getElementById('forum-create-text');
+    const tagInput = document.getElementById('forum-create-tag-input');
+    if (textInput) textInput.value = '';
+    if (tagInput) tagInput.value = '';
+    renderForumDraftTags();
+    document.getElementById('forum-create-post-modal').classList.add('active');
+}
+
+function closeForumCreatePostModal() {
+    document.getElementById('forum-create-post-modal').classList.remove('active');
+}
+
+function submitForumUserPost() {
+    if (!ensureForumMainAccountSelected()) return;
+    const textInput = document.getElementById('forum-create-text');
+    const content = String(textInput?.value || '').trim();
+    if (!content) {
+        alert('请输入发帖内容');
+        return;
+    }
+    const account = getForumCurrentAccount();
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const newPost = {
+        id: Date.now() + Math.random(),
+        type: 'user',
+        username: account?.name || '我',
+        avatar: account?.avatar || '',
+        content,
+        imageDesc: null,
+        tags: forumDraftTags.slice(0, 8),
+        comments: [],
+        timestamp: Date.now(),
+        accountId: currentForumAccountId,
+        characterId: null
+    };
+    bucket.posts.push(newPost);
+    DB.saveForumData(forumData);
+    closeForumCreatePostModal();
+    renderForumPosts();
+    renderForumProfileView();
+    generateForumCommentsForUserPost(newPost.id, currentForumAccountId);
+}
+
+function normalizeForumCommentText(text) {
+    return String(text || '')
+        .replace(/```/g, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 50);
+}
+
+async function generateForumCommentsForUserPost(postId, accountId) {
+    const settings = DB.getSettings();
+    if (!settings.key || !settings.url || !settings.model) return;
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, accountId, true);
+    const post = bucket.posts.find(item => String(item.id) === String(postId));
+    if (!post) return;
+    const contacts = getForumBoundContacts(accountId);
+    if (contacts.length === 0) return;
+    const forumSettings = normalizeForumSettings(forumData.settings);
+    const systemPrompt = forumSettings.systemPrompt || '这是一个普通的论坛';
+    const postTagsText = Array.isArray(post.tags) && post.tags.length > 0
+        ? `\n帖子标签：${post.tags.map(tag => `#${tag}`).join(' ')}`
+        : '';
+
+    const comments = [];
+    for (const contact of contacts) {
+        const worldBookContext = buildForumWorldBookContext(contact.id, forumSettings);
+        const prompt = `你正在扮演论坛用户 ${contact.name}。人设：${contact.persona || '未填写'}
+
+论坛设定：${systemPrompt}
+${worldBookContext}
+
+现在你看到用户 ${post.username} 发布的帖子：
+${post.content}${postTagsText}
+
+请只生成一条评论，要求：
+1. 字数不超过50字
+2. 只评论用户帖子本身
+3. 不要和其他角色互动
+4. 直接返回评论文本，不要JSON，不要解释`;
+        try {
+            const temp = settings.temperature !== undefined ? settings.temperature : 0.8;
+            const res = await fetch(`${settings.url}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` },
+                body: JSON.stringify({
+                    model: settings.model,
+                    messages: [{ role: "user", content: prompt }],
+                    temperature: temp
+                })
+            });
+            const data = await res.json();
+            const rawContent = data?.choices?.[0]?.message?.content;
+            const content = normalizeForumCommentText(rawContent);
+            if (!content) continue;
+            comments.push({
+                id: Date.now() + Math.random(),
+                characterId: contact.id,
+                username: contact.name,
+                avatar: contact.avatar || '',
+                content,
+                timestamp: Date.now()
+            });
+        } catch (err) {
+            console.warn('generate forum comment failed:', err);
+        }
+    }
+
+    if (comments.length === 0) return;
+    const freshData = DB.getForumData();
+    const freshBucket = getForumAccountBucket(freshData, accountId, true);
+    const freshPost = freshBucket.posts.find(item => String(item.id) === String(postId));
+    if (!freshPost) return;
+    freshPost.comments = comments;
+    DB.saveForumData(freshData);
+    renderForumPosts();
+    if (currentForumView === 'my') renderForumProfileView();
+}
+
+function initForumFab() {
+    if (forumFabState.inited) return;
+    const fab = document.getElementById('forum-fab');
+    const app = document.getElementById('app-forum');
+    if (!fab || !app) return;
+    forumFabState.inited = true;
+
+    fab.addEventListener('click', (evt) => {
+        if (forumFabState.moved) {
+            evt.preventDefault();
+            return;
+        }
+        openForumCreatePostModal();
+    });
+
+    fab.addEventListener('pointerdown', (evt) => {
+        forumFabState.pointerId = evt.pointerId;
+        forumFabState.moved = false;
+        forumFabState.downX = evt.clientX;
+        forumFabState.downY = evt.clientY;
+        forumFabState.startLeft = Number(fab.dataset.left || 0);
+        forumFabState.startTop = Number(fab.dataset.top || 0);
+        fab.setPointerCapture(evt.pointerId);
+    });
+
+    fab.addEventListener('pointermove', (evt) => {
+        if (forumFabState.pointerId !== evt.pointerId) return;
+        const dx = evt.clientX - forumFabState.downX;
+        const dy = evt.clientY - forumFabState.downY;
+        if (Math.abs(dx) + Math.abs(dy) > 5) forumFabState.moved = true;
+        if (!forumFabState.moved) return;
+
+        const maxLeft = Math.max(8, app.clientWidth - fab.offsetWidth - 8);
+        const maxTop = Math.max(96, app.clientHeight - fab.offsetHeight - 76);
+        const nextLeft = Math.max(8, Math.min(maxLeft, forumFabState.startLeft + dx));
+        const nextTop = Math.max(96, Math.min(maxTop, forumFabState.startTop + dy));
+        placeForumFab(nextLeft, nextTop);
+    });
+
+    fab.addEventListener('pointerup', (evt) => {
+        if (forumFabState.pointerId !== evt.pointerId) return;
+        fab.releasePointerCapture(evt.pointerId);
+        forumFabState.pointerId = null;
+        saveForumFabPosition();
+        setTimeout(() => { forumFabState.moved = false; }, 0);
+    });
+}
+
+function placeForumFab(left, top) {
+    const fab = document.getElementById('forum-fab');
+    if (!fab) return;
+    fab.style.left = `${left}px`;
+    fab.style.top = `${top}px`;
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+    fab.dataset.left = String(left);
+    fab.dataset.top = String(top);
+}
+
+function applyForumFabPositionFromData() {
+    const app = document.getElementById('app-forum');
+    const fab = document.getElementById('forum-fab');
+    if (!app || !fab) return;
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const x = Number(bucket.fabPos?.x);
+    const y = Number(bucket.fabPos?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+        placeForumFab(x, y);
+        return;
+    }
+    const defaultLeft = Math.max(8, app.clientWidth - fab.offsetWidth - 18);
+    const defaultTop = Math.max(96, app.clientHeight - fab.offsetHeight - 96);
+    placeForumFab(defaultLeft, defaultTop);
+}
+
+function saveForumFabPosition() {
+    const fab = document.getElementById('forum-fab');
+    if (!fab) return;
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    bucket.fabPos = {
+        x: Number(fab.dataset.left || 0),
+        y: Number(fab.dataset.top || 0)
+    };
+    DB.saveForumData(forumData);
+}
 
 // 切换论坛标签
 function switchForumTab(tab) {
@@ -8348,11 +9235,97 @@ function switchForumTab(tab) {
     renderForumPosts();
 }
 
+function switchForumView(view) {
+    currentForumView = view;
+    const header = document.querySelector('#app-forum .forum-header');
+    const feedView = document.getElementById('forum-feed-view');
+    const profileView = document.getElementById('forum-profile-view');
+    const navHome = document.getElementById('forum-nav-home');
+    const navMy = document.getElementById('forum-nav-my');
+    const addBtn = document.querySelector('#app-forum .forum-add-btn');
+    const settingsBtn = document.querySelector('#app-forum .forum-settings-btn');
+
+    if (header) header.style.display = view === 'home' ? 'flex' : 'none';
+    if (feedView) feedView.style.display = view === 'home' ? 'block' : 'none';
+    if (profileView) profileView.style.display = view === 'my' ? 'block' : 'none';
+    if (navHome) navHome.classList.toggle('active', view === 'home');
+    if (navMy) navMy.classList.toggle('active', view === 'my');
+    if (addBtn) addBtn.style.display = view === 'home' ? 'flex' : 'none';
+    if (settingsBtn) settingsBtn.style.display = view === 'home' ? 'flex' : 'none';
+
+    if (view === 'home') renderForumPosts();
+    if (view === 'my') renderForumProfileView();
+}
+
+function renderForumByCurrentView() {
+    if (currentForumView === 'my') renderForumProfileView();
+    else renderForumPosts();
+    renderForumBindCharacters();
+}
+
+function buildForumCommentsHtml(post) {
+    const comments = Array.isArray(post.comments) ? post.comments : [];
+    if (comments.length === 0) return '';
+    const rows = comments.map(comment => `
+        <div class="forum-comment-row">
+            <span class="forum-comment-name">${comment.username}</span>
+            <span class="forum-comment-text">${comment.content}</span>
+        </div>
+    `).join('');
+    return `<div class="forum-comments">${rows}</div>`;
+}
+
+function isForumPostLiked(postId) {
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    return bucket.likedPosts.some(post => String(post.sourcePostId) === String(postId));
+}
+
+function createForumPostSnapshot(post) {
+    return {
+        sourcePostId: post.id,
+        type: post.type,
+        username: post.username,
+        avatar: post.avatar || null,
+        content: post.content,
+        imageDesc: post.imageDesc || null,
+        tags: Array.isArray(post.tags) ? [...post.tags] : [],
+        comments: Array.isArray(post.comments) ? [...post.comments] : [],
+        timestamp: post.timestamp || Date.now(),
+        likedAt: Date.now()
+    };
+}
+
+function toggleForumLike(postId, evt = null) {
+    if (evt) evt.stopPropagation();
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const existingIndex = bucket.likedPosts.findIndex(post => String(post.sourcePostId) === String(postId));
+    if (existingIndex !== -1) {
+        bucket.likedPosts.splice(existingIndex, 1);
+    } else {
+        const sourcePost = bucket.posts.find(post => String(post.id) === String(postId));
+        if (!sourcePost) return;
+        bucket.likedPosts.push(createForumPostSnapshot(sourcePost));
+    }
+    DB.saveForumData(forumData);
+    renderForumPosts();
+    if (currentForumView === 'my') renderForumProfileView();
+}
+
 // 渲染论坛帖子
 function renderForumPosts() {
     const container = document.getElementById('forum-posts-container');
+    if (!container) return;
+    if (!ensureForumMainAccountSelected()) {
+        container.innerHTML = '';
+        return;
+    }
+
     const forumData = DB.getForumData();
-    const posts = forumData.posts || [];
+    const accountBucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const posts = accountBucket.posts || [];
+    const boundContactIds = new Set(getForumBoundContacts(currentForumAccountId).map(c => String(c.id)));
     
     container.innerHTML = '';
     
@@ -8362,7 +9335,9 @@ function renderForumPosts() {
     // 根据当前标签过滤
     const filteredPosts = sortedPosts.filter(post => {
         if (currentForumTab === 'following') {
-            return post.type === 'character';
+            if (post.type !== 'character') return false;
+            if (!post.characterId) return true;
+            return boundContactIds.has(String(post.characterId));
         } else {
             return post.type === 'passerby';
         }
@@ -8406,6 +9381,7 @@ function renderForumPosts() {
             avatarHtml = `<div class="forum-post-avatar" style="background: ${color};">${initial}</div>`;
         }
         
+        const tags = Array.isArray(post.tags) ? post.tags.slice(0, 8) : [];
         let contentHtml = `
             <div class="forum-post-header">
                 ${avatarHtml}
@@ -8422,6 +9398,18 @@ function renderForumPosts() {
         if (post.imageDesc) {
             contentHtml += `<div class="forum-post-image-desc">${post.imageDesc}</div>`;
         }
+
+        if (tags.length > 0) {
+            contentHtml += `<div class="forum-post-tags">${tags.map(tag => `<span class="forum-post-tag">#${String(tag).replace(/^#/, '')}</span>`).join('')}</div>`;
+        }
+
+        const liked = isForumPostLiked(post.id);
+        contentHtml += `
+            <div class="forum-post-actions">
+                <button class="forum-post-like-btn" type="button" onclick="toggleForumLike(${post.id}, event)">${liked ? '❤' : '♡'}</button>
+            </div>
+        `;
+        contentHtml += buildForumCommentsHtml(post);
         
         postEl.innerHTML += contentHtml;
         
@@ -8458,9 +9446,11 @@ function handleForumDeleteAction() {
     if (!currentEditingPostId) return;
     if (confirm('确定要删除这条帖子吗？')) {
         const forumData = DB.getForumData();
-        forumData.posts = forumData.posts.filter(p => p.id !== currentEditingPostId);
+        const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+        bucket.posts = bucket.posts.filter(p => p.id !== currentEditingPostId);
         DB.saveForumData(forumData);
         renderForumPosts();
+        if (currentForumView === 'my') renderForumProfileView();
     }
     closeForumActionSheet();
 }
@@ -8470,15 +9460,25 @@ function deleteForumPost(postId) {
     if (!confirm('确定要删除这条帖子吗？')) return;
     
     const forumData = DB.getForumData();
-    forumData.posts = forumData.posts.filter(p => p.id !== postId);
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    bucket.posts = bucket.posts.filter(p => p.id !== postId);
     DB.saveForumData(forumData);
     renderForumPosts();
+    if (currentForumView === 'my') renderForumProfileView();
 }
 
 // 打开设置弹窗
 function openForumSettings() {
+    if (!ensureForumMainAccountSelected()) return;
     const forumData = DB.getForumData();
-    document.getElementById('forum-system-prompt').value = forumData.settings?.systemPrompt || '';
+    const forumSettings = normalizeForumSettings(forumData.settings);
+    document.getElementById('forum-system-prompt').value = forumSettings.systemPrompt || '';
+    document.getElementById('forum-character-post-min').value = forumSettings.characterPostMin;
+    document.getElementById('forum-character-post-max').value = forumSettings.characterPostMax;
+    document.getElementById('forum-npc-post-min').value = forumSettings.npcPostMin;
+    document.getElementById('forum-npc-post-max').value = forumSettings.npcPostMax;
+    document.getElementById('forum-use-global-worldbook').checked = forumSettings.useGlobalWorldBook !== false;
+    renderForumWorldBookBindings();
     renderForumBindCharacters();
     document.getElementById('forum-settings-modal').classList.add('active');
 }
@@ -8486,27 +9486,125 @@ function openForumSettings() {
 // 渲染论坛绑定角色列表
 function renderForumBindCharacters() {
     const container = document.getElementById('forum-bind-characters');
-    const contacts = DB.getContacts();
-    const forumData = DB.getForumData();
-    const boundCharacters = forumData.settings?.boundCharacters || [];
+    if (!container) return;
+    if (!ensureForumMainAccountSelected()) {
+        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">请先选择论坛主账号</div>';
+        return;
+    }
+    const contacts = getForumBoundContacts(currentForumAccountId);
     
     container.innerHTML = '';
     
     if (contacts.length === 0) {
-        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">暂无联系人</div>';
+        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">当前账号下暂无绑定角色</div>';
         return;
     }
     
     contacts.forEach(contact => {
-        const isChecked = boundCharacters.includes(contact.id.toString());
         const item = document.createElement('div');
         item.style.cssText = 'display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #333;';
         item.innerHTML = `
-            <input type="checkbox" id="forum-bind-char-${contact.id}" value="${contact.id}" ${isChecked ? 'checked' : ''} style="margin-right: 10px;">
-            <label for="forum-bind-char-${contact.id}" style="flex: 1; cursor: pointer; color: #fff;">${contact.name}</label>
+            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:10px; background:#5856d6;"></span>
+            <div style="flex: 1; color: #fff;">${contact.name}</div>
         `;
         container.appendChild(item);
     });
+}
+
+function renderForumWorldBookBindings() {
+    const container = document.getElementById('forum-worldbook-bind-roles');
+    if (!container) return;
+    if (!ensureForumMainAccountSelected()) {
+        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">请先选择论坛主账号</div>';
+        return;
+    }
+
+    const contacts = getForumBoundContacts(currentForumAccountId);
+    const wb = DB.getWorldBook();
+    const localEntries = (wb.entries || []).filter(e => e.type === 'local');
+    const forumData = DB.getForumData();
+    const forumSettings = normalizeForumSettings(forumData.settings);
+    const roleLocalWorldBooks = forumSettings.roleLocalWorldBooks || {};
+
+    container.innerHTML = '';
+    if (contacts.length === 0) {
+        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">当前账号下暂无绑定角色</div>';
+        return;
+    }
+    if (localEntries.length === 0) {
+        container.innerHTML = '<div style="padding: 10px; color: #999; font-size: 12px;">世界书中暂无“局部”条目</div>';
+        return;
+    }
+
+    contacts.forEach(contact => {
+        const roleBlock = document.createElement('div');
+        roleBlock.style.cssText = 'padding: 8px 0; border-bottom: 1px solid #333;';
+
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:13px; color:#fff; margin-bottom:6px; font-weight:600;';
+        title.textContent = contact.name;
+        roleBlock.appendChild(title);
+
+        const boundIds = roleLocalWorldBooks[String(contact.id)] || [];
+        localEntries.forEach(entry => {
+            const row = document.createElement('label');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px; color:#ddd; font-size:12px; margin:4px 0; cursor:pointer;';
+            row.innerHTML = `
+                <input type="checkbox" data-forum-role-wb="${contact.id}" value="${entry.id}" ${boundIds.includes(String(entry.id)) ? 'checked' : ''}>
+                <span>${entry.title}</span>
+            `;
+            roleBlock.appendChild(row);
+        });
+        container.appendChild(roleBlock);
+    });
+}
+
+function randomIntInclusive(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function distributeForumPostCounts(total, roleCount, ensureEachAtLeastOne) {
+    const counts = Array(roleCount).fill(0);
+    if (roleCount <= 0 || total <= 0) return counts;
+    let remaining = total;
+    if (ensureEachAtLeastOne && total >= roleCount) {
+        for (let i = 0; i < roleCount; i++) counts[i] = 1;
+        remaining -= roleCount;
+    }
+    while (remaining > 0) {
+        const idx = Math.floor(Math.random() * roleCount);
+        counts[idx] += 1;
+        remaining -= 1;
+    }
+    return counts;
+}
+
+function buildForumWorldBookContext(contactId = null, forumSettings = null) {
+    const settings = forumSettings || normalizeForumSettings(DB.getForumData().settings);
+    const wb = DB.getWorldBook();
+    const lines = [];
+
+    if (settings.useGlobalWorldBook) {
+        const globalEntries = (wb.entries || []).filter(e => e.type === 'global');
+        if (globalEntries.length > 0) {
+            lines.push('[全局世界书]');
+            globalEntries.forEach(entry => lines.push(`【${entry.title}】：${entry.content}`));
+        }
+    }
+
+    if (contactId != null) {
+        const boundIds = (settings.roleLocalWorldBooks && settings.roleLocalWorldBooks[String(contactId)]) || [];
+        const localEntries = boundIds
+            .map(id => (wb.entries || []).find(e => String(e.id) === String(id) && e.type === 'local'))
+            .filter(Boolean);
+        if (localEntries.length > 0) {
+            lines.push('[角色局部世界书]');
+            localEntries.forEach(entry => lines.push(`【${entry.title}】：${entry.content}`));
+        }
+    }
+
+    if (lines.length === 0) return '';
+    return `\n\n世界书设定：\n${lines.join('\n')}`;
 }
 
 // 关闭设置弹窗
@@ -8517,13 +9615,36 @@ function closeForumSettings() {
 // 保存论坛设置
 function saveForumSettings() {
     const systemPrompt = document.getElementById('forum-system-prompt').value.trim();
-    const boundCharacters = [...document.querySelectorAll('#forum-bind-characters input:checked')].map(cb => cb.value);
-    
+    const characterRange = parseForumPostRange(
+        document.getElementById('forum-character-post-min').value,
+        document.getElementById('forum-character-post-max').value,
+        5,
+        10
+    );
+    const npcRange = parseForumPostRange(
+        document.getElementById('forum-npc-post-min').value,
+        document.getElementById('forum-npc-post-max').value,
+        5,
+        10
+    );
+    const useGlobalWorldBook = document.getElementById('forum-use-global-worldbook').checked;
+    const roleLocalWorldBooks = {};
+    const contacts = getForumBoundContacts(currentForumAccountId);
+    contacts.forEach(contact => {
+        const checked = [...document.querySelectorAll(`input[data-forum-role-wb="${contact.id}"]:checked`)].map(el => String(el.value));
+        roleLocalWorldBooks[String(contact.id)] = checked;
+    });
+
     const forumData = DB.getForumData();
-    forumData.settings = { 
-        systemPrompt: systemPrompt,
-        boundCharacters: boundCharacters
-    };
+    forumData.settings = normalizeForumSettings({
+        systemPrompt,
+        characterPostMin: characterRange.min,
+        characterPostMax: characterRange.max,
+        npcPostMin: npcRange.min,
+        npcPostMax: npcRange.max,
+        useGlobalWorldBook,
+        roleLocalWorldBooks
+    });
     DB.saveForumData(forumData);
     closeForumSettings();
     alert('论坛设置已保存');
@@ -8531,18 +9652,20 @@ function saveForumSettings() {
 
 // 清空所有帖子
 function clearAllForumPosts() {
-    if (!confirm('确定要清空所有帖子吗？（不包括用户自己发的帖）')) return;
+    if (!confirm('确定要清空当前论坛账号下的所有帖子吗？')) return;
     
     const forumData = DB.getForumData();
-    forumData.posts = [];
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    bucket.posts = [];
     DB.saveForumData(forumData);
     renderForumPosts();
     closeForumSettings();
-    alert('所有帖子已清空');
+    alert('当前账号帖子已清空');
 }
 
 // 打开添加帖子弹窗
 function openForumAddModal() {
+    if (!ensureForumMainAccountSelected()) return;
     document.getElementById('forum-add-modal').classList.add('active');
 }
 
@@ -8553,6 +9676,7 @@ function closeForumAddModal() {
 
 // 生成论坛帖子
 async function generateForumPosts(type) {
+    if (!ensureForumMainAccountSelected()) return;
     const settings = DB.getSettings();
     if (!settings.key) {
         alert('请先在设置中配置 API Key');
@@ -8561,11 +9685,9 @@ async function generateForumPosts(type) {
     
     // 如果是角色帖子，检查是否有绑定的角色
     if (type === 'character') {
-        const forumData = DB.getForumData();
-        const boundCharacters = forumData.settings?.boundCharacters || [];
-        
-        if (boundCharacters.length === 0) {
-            alert('请先在论坛设置中绑定角色');
+        const boundContacts = getForumBoundContacts(currentForumAccountId);
+        if (boundContacts.length === 0) {
+            alert('当前论坛账号下暂无可发帖角色，请先在通讯录把角色绑定到该用户人设');
             return;
         }
     }
@@ -8574,18 +9696,21 @@ async function generateForumPosts(type) {
     alert('正在生成帖子，请稍候...');
     
     try {
-        const posts = await callForumAPI(type);
+        const posts = await callForumAPI(type, currentForumAccountId);
         if (posts && posts.length > 0) {
             const forumData = DB.getForumData();
+            const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
             posts.forEach(postData => {
-                forumData.posts.push({
+                bucket.posts.push({
                     id: Date.now() + Math.random(),
                     type: type,
                     username: postData.username,
                     avatar: postData.avatar || null,
                     content: postData.content,
                     imageDesc: postData.imageDesc || null,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    accountId: currentForumAccountId,
+                    characterId: postData.characterId || null
                 });
             });
             DB.saveForumData(forumData);
@@ -8598,70 +9723,83 @@ async function generateForumPosts(type) {
 }
 
 // 调用API生成帖子
-async function callForumAPI(type) {
+async function callForumAPI(type, accountId) {
     const settings = DB.getSettings();
     const forumData = DB.getForumData();
-    const systemPrompt = forumData.settings?.systemPrompt || '这是一个普通的论坛';
-    
-    let prompt = '';
+    const forumSettings = normalizeForumSettings(forumData.settings);
+    const systemPrompt = forumSettings.systemPrompt || '这是一个普通的论坛';
     
     if (type === 'character') {
-        // 角色帖子
-        const contacts = DB.getContacts();
+        const contacts = getForumBoundContacts(accountId);
         if (contacts.length === 0) {
-            throw new Error('请先在通讯录添加角色');
+            throw new Error('当前论坛账号下暂无绑定角色');
         }
-        
-        const contact = contacts[0]; // 使用第一个联系人
-        
-        prompt = `你正在扮演 ${contact.name}。人设：${contact.persona}
+
+        const totalPosts = randomIntInclusive(forumSettings.characterPostMin, forumSettings.characterPostMax);
+        const ensureEachAtLeastOne = forumSettings.characterPostMin >= contacts.length;
+        const rolePostCounts = distributeForumPostCounts(totalPosts, contacts.length, ensureEachAtLeastOne);
+        const allPosts = [];
+        for (let i = 0; i < contacts.length; i++) {
+            const contact = contacts[i];
+            const targetCount = rolePostCounts[i];
+            if (targetCount <= 0) continue;
+            const worldBookContext = buildForumWorldBookContext(contact.id, forumSettings);
+            const prompt = `你正在扮演 ${contact.name}。人设：${contact.persona || '未填写'}
 
 论坛设定：${systemPrompt}
+${worldBookContext}
 
-请生成 5-10 条你在这个论坛上发布的帖子。
+请生成 ${targetCount} 条你在这个论坛上发布的帖子。
 
 要求：
 1. 以第一人称（我）发帖
 2. 每条帖子不超过100字
 3. 内容符合你的人设和性格
-4. 至少生成1条带图帖子（不需要真实图片，只生成图片描述）
-5. 严格返回JSON数组格式：
+4. 严格返回JSON数组格式：
 [
   {
     "content": "帖子文本内容",
     "imageDesc": "图片描述（可选，如果没有图则为 null）"
   }
 ]`;
-        
-        const temp = settings.temperature !== undefined ? settings.temperature : 0.8;
-        const res = await fetch(`${settings.url}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` },
-            body: JSON.stringify({
-                model: settings.model,
-                messages: [{ role: "user", content: prompt }],
-                temperature: temp
-            })
-        });
-        
-        const data = await res.json();
-        if (data.choices && data.choices.length > 0) {
+
+            const temp = settings.temperature !== undefined ? settings.temperature : 0.8;
+            const res = await fetch(`${settings.url}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` },
+                body: JSON.stringify({
+                    model: settings.model,
+                    messages: [{ role: "user", content: prompt }],
+                    temperature: temp
+                })
+            });
+            const data = await res.json();
+            if (!(data.choices && data.choices.length > 0)) continue;
+
             let content = data.choices[0].message.content.trim();
             content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-            
             const postsData = JSON.parse(content);
-            return postsData.map(p => ({
-                username: contact.name,
-                avatar: contact.avatar,
-                content: p.content,
-                imageDesc: p.imageDesc
-            }));
+            if (!Array.isArray(postsData)) continue;
+            postsData.slice(0, targetCount).forEach(p => {
+                if (!p || !p.content) return;
+                allPosts.push({
+                    username: contact.name,
+                    avatar: contact.avatar,
+                    content: p.content,
+                    imageDesc: p.imageDesc || null,
+                    characterId: contact.id
+                });
+            });
         }
+        return allPosts;
     } else {
         // 路人帖子
-        prompt = `论坛设定：${systemPrompt}
+        const npcCount = randomIntInclusive(forumSettings.npcPostMin, forumSettings.npcPostMax);
+        const worldBookContext = buildForumWorldBookContext(null, forumSettings);
+        const prompt = `论坛设定：${systemPrompt}
+${worldBookContext}
 
-请生成 4-8 条路人在这个论坛上发布的帖子。
+请生成 ${npcCount} 条路人在这个论坛上发布的帖子。
 
 要求：
 1. 随机生成网名
@@ -8700,7 +9838,9 @@ async function callForumAPI(type) {
             let content = data.choices[0].message.content.trim();
             content = content.replace(/```json/g, '').replace(/```/g, '').trim();
             
-            return JSON.parse(content);
+            const parsed = JSON.parse(content);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.slice(0, npcCount);
         }
     }
     
@@ -8711,7 +9851,8 @@ async function callForumAPI(type) {
 function openForumEditModal(postId) {
     currentEditingPostId = postId;
     const forumData = DB.getForumData();
-    const post = forumData.posts.find(p => p.id === postId);
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const post = bucket.posts.find(p => p.id === postId);
     
     if (!post) return;
     
@@ -8736,12 +9877,14 @@ function saveForumPostEdit() {
     }
     
     const forumData = DB.getForumData();
-    const post = forumData.posts.find(p => p.id === currentEditingPostId);
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const post = bucket.posts.find(p => p.id === currentEditingPostId);
     
     if (post) {
         post.content = newContent;
         DB.saveForumData(forumData);
         renderForumPosts();
+        if (currentForumView === 'my') renderForumProfileView();
         closeForumEditModal();
         alert('帖子已更新');
     }
@@ -8751,8 +9894,10 @@ function saveForumPostEdit() {
 function enterForumDeleteMode() {
     isForumDeleteMode = true;
     selectedForumPostIds.clear();
-    document.getElementById('forum-posts-container').classList.add('forum-delete-mode');
-    document.getElementById('forum-delete-bar').classList.add('active');
+    const container = document.getElementById('forum-posts-container');
+    const deleteBar = document.getElementById('forum-delete-bar');
+    if (container) container.classList.add('forum-delete-mode');
+    if (deleteBar) deleteBar.classList.add('active');
     renderForumPosts();
 }
 
@@ -8760,8 +9905,10 @@ function enterForumDeleteMode() {
 function exitForumDeleteMode() {
     isForumDeleteMode = false;
     selectedForumPostIds.clear();
-    document.getElementById('forum-posts-container').classList.remove('forum-delete-mode');
-    document.getElementById('forum-delete-bar').classList.remove('active');
+    const container = document.getElementById('forum-posts-container');
+    const deleteBar = document.getElementById('forum-delete-bar');
+    if (container) container.classList.remove('forum-delete-mode');
+    if (deleteBar) deleteBar.classList.remove('active');
     renderForumPosts();
 }
 
@@ -8784,10 +9931,117 @@ function confirmDeleteForumPosts() {
     
     if (confirm(`确定要删除选中的 ${selectedForumPostIds.size} 条帖子吗？`)) {
         const forumData = DB.getForumData();
-        forumData.posts = forumData.posts.filter(p => !selectedForumPostIds.has(p.id));
+        const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+        bucket.posts = bucket.posts.filter(p => !selectedForumPostIds.has(p.id));
         DB.saveForumData(forumData);
         exitForumDeleteMode();
     }
+}
+
+function switchForumProfileSection(section) {
+    currentForumProfileSection = section === 'likes' ? 'likes' : 'posts';
+    const postsTab = document.getElementById('forum-profile-tab-posts');
+    const likesTab = document.getElementById('forum-profile-tab-likes');
+    if (postsTab) postsTab.classList.toggle('active', currentForumProfileSection === 'posts');
+    if (likesTab) likesTab.classList.toggle('active', currentForumProfileSection === 'likes');
+    renderForumProfileSectionList();
+}
+
+function formatForumTime(timestamp) {
+    const date = new Date(timestamp || Date.now());
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function renderForumProfileSectionList() {
+    const listEl = document.getElementById('forum-profile-post-list');
+    if (!listEl) return;
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+    const sourceList = currentForumProfileSection === 'likes'
+        ? [...bucket.likedPosts].sort((a, b) => (b.likedAt || 0) - (a.likedAt || 0))
+        : [...bucket.posts].filter(post => post.type === 'user').sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    if (sourceList.length === 0) {
+        listEl.innerHTML = `<div style="color:#999; font-size:13px; text-align:center; padding:18px 0;">${currentForumProfileSection === 'likes' ? '还没有喜欢的帖子' : '还没有发布帖子'}</div>`;
+        return;
+    }
+
+    listEl.innerHTML = '';
+    sourceList.forEach(post => {
+        const postEl = document.createElement('div');
+        postEl.className = 'forum-post';
+        const avatar = post.avatar || buildForumAccountAvatar(getForumCurrentAccount());
+        const tags = Array.isArray(post.tags) ? post.tags.slice(0, 8) : [];
+        const sourcePostId = post.sourcePostId || post.id;
+        const liked = isForumPostLiked(sourcePostId);
+        const canEdit = currentForumProfileSection === 'posts' && post.type === 'user' && post.id;
+        postEl.innerHTML = `
+            <div class="forum-post-header">
+                <div class="forum-post-avatar"><img src="${avatar}"></div>
+                <div class="forum-post-info">
+                    <div class="forum-post-username">${post.username || '我'}</div>
+                    <div class="forum-post-time">${formatForumTime(post.timestamp)}</div>
+                </div>
+                ${canEdit ? `<div class="forum-post-menu" onclick="openForumPostMenu(${post.id})">⋯</div>` : ''}
+            </div>
+            <div class="forum-post-content">${post.content || ''}</div>
+            ${post.imageDesc ? `<div class="forum-post-image-desc">${post.imageDesc}</div>` : ''}
+            ${tags.length ? `<div class="forum-post-tags">${tags.map(tag => `<span class="forum-post-tag">#${String(tag).replace(/^#/, '')}</span>`).join('')}</div>` : ''}
+            <div class="forum-post-actions">
+                <button class="forum-post-like-btn" type="button" onclick="toggleForumLike('${String(sourcePostId)}', event)">${liked ? '❤' : '♡'}</button>
+            </div>
+            ${buildForumCommentsHtml(post)}
+        `;
+        listEl.appendChild(postEl);
+    });
+}
+
+function renderForumProfileView() {
+    const account = getForumCurrentAccount();
+    const nameEl = document.getElementById('forum-profile-name');
+    const avatarEl = document.getElementById('forum-profile-avatar-img');
+    const wallpaperEl = document.getElementById('forum-profile-wallpaper');
+    if (!nameEl || !avatarEl || !wallpaperEl) return;
+
+    if (!account) {
+        nameEl.textContent = '未选择账号';
+        avatarEl.src = DEFAULT_USER_ACCOUNT_PREVIEW_AVATAR;
+        wallpaperEl.style.backgroundImage = '';
+        wallpaperEl.classList.remove('has-image');
+        renderForumProfileSectionList();
+        return;
+    }
+
+    const forumData = DB.getForumData();
+    const bucket = getForumAccountBucket(forumData, account.id, true);
+    const wallpaper = bucket.profile?.wallpaper || '';
+
+    nameEl.textContent = account.name || '我';
+    avatarEl.src = buildForumAccountAvatar(account);
+    wallpaperEl.style.backgroundImage = wallpaper ? `url(${wallpaper})` : 'none';
+    wallpaperEl.classList.toggle('has-image', !!wallpaper);
+    switchForumProfileSection(currentForumProfileSection);
+}
+
+function triggerForumWallpaperUpload() {
+    if (!ensureForumMainAccountSelected()) return;
+    const input = document.getElementById('forum-profile-wallpaper-input');
+    if (input) input.click();
+}
+
+function uploadForumProfileWallpaper(input) {
+    if (!input.files?.[0]) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const forumData = DB.getForumData();
+        const bucket = getForumAccountBucket(forumData, currentForumAccountId, true);
+        if (!bucket.profile) bucket.profile = {};
+        bucket.profile.wallpaper = e.target.result || '';
+        DB.saveForumData(forumData);
+        renderForumProfileView();
+        input.value = '';
+    };
+    reader.readAsDataURL(input.files[0]);
 }
 
 // 在 openApp 函数中添加论坛的渲染
@@ -8795,7 +10049,7 @@ const originalOpenAppForForum = openApp;
 openApp = function(appId) {
     originalOpenAppForForum(appId);
     if (appId === 'app-forum') {
-        renderForumPosts();
+        initForumApp();
     }
 };
 
@@ -11543,4 +12797,325 @@ function setShoppingFabPosition(left, top) {
     fab.style.bottom = 'auto';
     fab.dataset.left = String(left);
     fab.dataset.top = String(top);
+}
+
+// --- 塔罗牌 App 功能 ---
+const TAROT_ROLES = ['过去', '现在', '未来'];
+const TAROT_CARD_POOL = [
+    { name: '愚者', meaning: '新的起点、勇敢启程、未知中的信任' },
+    { name: '魔术师', meaning: '行动力、资源整合、把想法变成现实' },
+    { name: '女祭司', meaning: '直觉、内在洞察、先观察再决定' },
+    { name: '皇后', meaning: '滋养、成长、情感与创造力的丰盛' },
+    { name: '皇帝', meaning: '秩序、责任、建立稳定边界' },
+    { name: '教皇', meaning: '传统、规则、向可靠经验学习' },
+    { name: '恋人', meaning: '关系选择、价值一致、真诚沟通' },
+    { name: '战车', meaning: '推进、意志、在拉扯中保持方向' },
+    { name: '力量', meaning: '温柔的掌控、耐心、内在勇气' },
+    { name: '隐者', meaning: '独处反思、寻找答案、沉淀后行动' },
+    { name: '命运之轮', meaning: '转机、周期变化、顺势而为' },
+    { name: '正义', meaning: '平衡、因果、理性与公平判断' },
+    { name: '倒吊人', meaning: '换位思考、暂停、重新理解处境' },
+    { name: '死神', meaning: '结束与重生、断舍离、迎接新阶段' },
+    { name: '节制', meaning: '协调、修复、循序渐进的改善' },
+    { name: '恶魔', meaning: '执念、束缚、识别让你内耗的模式' },
+    { name: '高塔', meaning: '突变、真相显现、旧结构被打破' },
+    { name: '星星', meaning: '希望、疗愈、对未来保持信念' },
+    { name: '月亮', meaning: '不安、模糊、需要辨识情绪与事实' },
+    { name: '太阳', meaning: '清晰、成功、被看见与积极能量' },
+    { name: '审判', meaning: '觉醒、复盘、做出关键决定' },
+    { name: '世界', meaning: '完成、整合、进入成熟的新周期' }
+];
+const tarotState = {
+    inited: false,
+    starsInited: false,
+    stage: 'input',
+    question: '',
+    deck: [],
+    selected: [null, null, null],
+    shuffleTimer: null,
+    aiLoading: false
+};
+
+function initTarotApp() {
+    initTarotStars();
+    if (!tarotState.inited) {
+        tarotState.inited = true;
+        const cardGrid = document.getElementById('tarot-cards-grid');
+        if (cardGrid) {
+            cardGrid.addEventListener('click', (event) => {
+                const slot = event.target.closest('.tarot-card-slot');
+                if (!slot) return;
+                const idx = Number(slot.dataset.index);
+                if (!Number.isInteger(idx)) return;
+                revealTarotCardAt(idx);
+            });
+        }
+    }
+    showTarotStage('input');
+}
+
+function pauseTarotRuntime() {
+    if (tarotState.shuffleTimer) {
+        clearTimeout(tarotState.shuffleTimer);
+        tarotState.shuffleTimer = null;
+    }
+}
+
+function initTarotStars() {
+    if (tarotState.starsInited) return;
+    const layer = document.getElementById('tarot-star-layer');
+    if (!layer) return;
+    tarotState.starsInited = true;
+    layer.innerHTML = '';
+    for (let i = 0; i < 42; i++) {
+        const star = document.createElement('span');
+        star.className = 'tarot-star';
+        const size = Math.random() * 2.4 + 0.9;
+        star.style.width = `${size}px`;
+        star.style.height = `${size}px`;
+        star.style.left = `${Math.random() * 100}%`;
+        star.style.top = `${Math.random() * 100}%`;
+        star.style.animationDuration = `${Math.random() * 7 + 5}s`;
+        star.style.animationDelay = `${Math.random() * 6}s`;
+        layer.appendChild(star);
+    }
+}
+
+function showTarotStage(stage) {
+    tarotState.stage = stage;
+    const map = {
+        input: document.getElementById('tarot-view-input'),
+        draw: document.getElementById('tarot-view-draw'),
+        ai: document.getElementById('tarot-view-ai')
+    };
+    Object.values(map).forEach((el) => {
+        if (!el) return;
+        el.classList.remove('active');
+    });
+    if (map[stage]) map[stage].classList.add('active');
+}
+
+function resetTarotFlow(options = {}) {
+    const preserveQuestion = options.preserveQuestion === true;
+    pauseTarotRuntime();
+    tarotState.deck = [];
+    tarotState.selected = [null, null, null];
+    tarotState.aiLoading = false;
+    tarotState.question = preserveQuestion ? tarotState.question : '';
+    const input = document.getElementById('tarot-question-input');
+    if (input && !preserveQuestion) input.value = '';
+    const drawTip = document.getElementById('tarot-draw-tip');
+    if (drawTip) drawTip.innerText = '请静心等待，牌面正在被命运之风洗净';
+    const shuffleArea = document.getElementById('tarot-shuffle-area');
+    if (shuffleArea) shuffleArea.classList.remove('active');
+    const cardsGrid = document.getElementById('tarot-cards-grid');
+    if (cardsGrid) cardsGrid.classList.remove('active');
+    const aiBtn = document.getElementById('tarot-ai-btn');
+    if (aiBtn) {
+        aiBtn.classList.remove('active');
+        aiBtn.disabled = true;
+    }
+    const summary = document.getElementById('tarot-picked-summary');
+    if (summary) summary.innerHTML = '';
+    const aiResult = document.getElementById('tarot-ai-result');
+    if (aiResult) aiResult.innerText = 'AI 解牌中，请稍候...';
+    const restartBtn = document.getElementById('tarot-restart-btn');
+    if (restartBtn) restartBtn.style.display = 'none';
+}
+
+function restartTarotFlow() {
+    resetTarotFlow({ preserveQuestion: false });
+    showTarotStage('input');
+}
+
+function startTarotSession() {
+    const questionInput = document.getElementById('tarot-question-input');
+    if (!questionInput) return;
+    const question = String(questionInput.value || '').trim();
+    if (!question) {
+        alert('请先输入你想得到解答的问题');
+        return;
+    }
+    tarotState.question = question;
+    tarotState.deck = shuffleTarotDeck(TAROT_CARD_POOL.slice());
+    tarotState.selected = [null, null, null];
+    tarotState.aiLoading = false;
+
+    showTarotStage('draw');
+    renderTarotCardsBackOnly();
+
+    const shuffleArea = document.getElementById('tarot-shuffle-area');
+    const cardsGrid = document.getElementById('tarot-cards-grid');
+    const drawTip = document.getElementById('tarot-draw-tip');
+    const aiBtn = document.getElementById('tarot-ai-btn');
+    if (shuffleArea) shuffleArea.classList.add('active');
+    if (cardsGrid) cardsGrid.classList.remove('active');
+    if (drawTip) drawTip.innerText = '请静心等待，牌面正在被命运之风洗净';
+    if (aiBtn) {
+        aiBtn.classList.remove('active');
+        aiBtn.disabled = true;
+    }
+
+    pauseTarotRuntime();
+    tarotState.shuffleTimer = setTimeout(() => {
+        tarotState.shuffleTimer = null;
+        if (shuffleArea) shuffleArea.classList.remove('active');
+        if (cardsGrid) cardsGrid.classList.add('active');
+        if (drawTip) drawTip.innerText = '请依次点击三张塔罗牌，揭示过去 / 现在 / 未来';
+    }, 2600);
+}
+
+function shuffleTarotDeck(cards) {
+    for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = cards[i];
+        cards[i] = cards[j];
+        cards[j] = temp;
+    }
+    return cards;
+}
+
+function renderTarotCardsBackOnly() {
+    const wrap = document.getElementById('tarot-cards-grid');
+    if (!wrap) return;
+    wrap.innerHTML = TAROT_ROLES.map((role, idx) => `
+        <div class="tarot-card-slot" data-index="${idx}">
+            <div class="tarot-card-inner">
+                <div class="tarot-card-front"></div>
+                <div class="tarot-card-back">
+                    <div class="tarot-card-role">${role}</div>
+                    <div class="tarot-card-name">等待翻开</div>
+                    <div class="tarot-card-meaning">轻触此牌揭示命运讯息</div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function revealTarotCardAt(index) {
+    if (tarotState.stage !== 'draw') return;
+    const cardsGrid = document.getElementById('tarot-cards-grid');
+    if (!cardsGrid || !cardsGrid.classList.contains('active')) return;
+    if (index < 0 || index >= TAROT_ROLES.length) return;
+    if (tarotState.selected[index]) return;
+    if (!tarotState.deck.length) tarotState.deck = shuffleTarotDeck(TAROT_CARD_POOL.slice());
+    const card = tarotState.deck.pop();
+    if (!card) return;
+    tarotState.selected[index] = { role: TAROT_ROLES[index], name: card.name, meaning: card.meaning };
+    renderTarotSelectedState();
+
+    const allRevealed = tarotState.selected.every(Boolean);
+    if (allRevealed) {
+        const drawTip = document.getElementById('tarot-draw-tip');
+        if (drawTip) drawTip.innerText = '三张牌已揭示，点击下方按钮进入 AI 辅助解牌';
+        const aiBtn = document.getElementById('tarot-ai-btn');
+        if (aiBtn) {
+            aiBtn.classList.add('active');
+            aiBtn.disabled = false;
+        }
+    }
+}
+
+function renderTarotSelectedState() {
+    const wrap = document.getElementById('tarot-cards-grid');
+    if (!wrap) return;
+    const slots = wrap.querySelectorAll('.tarot-card-slot');
+    slots.forEach((slot, idx) => {
+        const picked = tarotState.selected[idx];
+        const back = slot.querySelector('.tarot-card-back');
+        if (!back) return;
+        if (picked) {
+            slot.classList.add('revealed');
+            const roleEl = back.querySelector('.tarot-card-role');
+            const nameEl = back.querySelector('.tarot-card-name');
+            const meaningEl = back.querySelector('.tarot-card-meaning');
+            if (roleEl) roleEl.innerText = picked.role;
+            if (nameEl) nameEl.innerText = picked.name;
+            if (meaningEl) meaningEl.innerText = picked.meaning;
+        } else {
+            slot.classList.remove('revealed');
+        }
+    });
+}
+
+function renderTarotPickedSummary() {
+    const summary = document.getElementById('tarot-picked-summary');
+    if (!summary) return;
+    summary.innerHTML = tarotState.selected.filter(Boolean).map(item => `
+        <div class="tarot-meaning-item">
+            <b>${tarotEscapeHtml(item.role)}：${tarotEscapeHtml(item.name)}</b><br>
+            ${tarotEscapeHtml(item.meaning)}
+        </div>
+    `).join('');
+}
+
+function tarotEscapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function requestTarotAIReading() {
+    if (tarotState.aiLoading) return;
+    if (!tarotState.selected.every(Boolean)) {
+        alert('请先翻开三张牌');
+        return;
+    }
+    const settings = DB.getSettings();
+    if (!settings.url || !settings.key || !settings.model) {
+        alert('请先在设置中填写 API 地址、API Key 和模型名称');
+        return;
+    }
+
+    tarotState.aiLoading = true;
+    showTarotStage('ai');
+    renderTarotPickedSummary();
+    const aiResult = document.getElementById('tarot-ai-result');
+    const restartBtn = document.getElementById('tarot-restart-btn');
+    if (aiResult) aiResult.innerText = 'AI 解牌中，请稍候...';
+    if (restartBtn) restartBtn.style.display = 'none';
+
+    try {
+        const cardText = tarotState.selected.map(item => `${item.role}：${item.name}（${item.meaning}）`).join('\n');
+        const prompt = [
+            '你是专业塔罗顾问，请根据用户问题与三张牌给出解读。',
+            `用户问题：${tarotState.question}`,
+            '抽到的牌：',
+            cardText,
+            '要求：',
+            '1) 输出中文，不少于200字；',
+            '2) 结构包含：总体趋势、关键矛盾、行动建议；',
+            '3) 语气温和具体，不要神化，不要空泛；',
+            '4) 不要输出 Markdown 标题，不要输出 JSON。'
+        ].join('\n');
+
+        const response = await fetch(`${settings.url.replace(/\/$/, '')}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${settings.key}`
+            },
+            body: JSON.stringify({
+                model: settings.model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.75
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('API 返回为空');
+        if (aiResult) aiResult.innerText = content.trim();
+    } catch (err) {
+        console.error(err);
+        if (aiResult) aiResult.innerText = `AI 解牌失败：${err.message || err}`;
+    } finally {
+        tarotState.aiLoading = false;
+        if (restartBtn) restartBtn.style.display = 'block';
+    }
 }
