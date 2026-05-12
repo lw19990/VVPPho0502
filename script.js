@@ -883,6 +883,7 @@ const DB = {
             model: 'gpt-3.5-turbo',
             prompt: DEFAULT_SYSTEM_PROMPT,
             fullscreen: true,
+            hideNotch: false,
             temperature: 0.7,
             keepAliveEnabled: false,
             notificationPermissionGranted: false
@@ -890,6 +891,7 @@ const DB = {
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
         if (saved.fullscreen === undefined) saved.fullscreen = true;
+        if (saved.hideNotch === undefined) saved.hideNotch = false;
         if (saved.temperature === undefined) saved.temperature = 0.7;
         if (saved.keepAliveEnabled === undefined) saved.keepAliveEnabled = false;
         if (saved.notificationPermissionGranted === undefined) saved.notificationPermissionGranted = false;
@@ -1627,11 +1629,13 @@ function loadSettings() {
     document.getElementById('model-name').value = s.model;
     document.getElementById('system-prompt').value = s.prompt;
     document.getElementById('fullscreen-toggle').checked = s.fullscreen;
+    document.getElementById('hide-notch-toggle').checked = s.hideNotch === true;
     document.getElementById('keep-alive-toggle').checked = s.keepAliveEnabled === true;
     const temp = s.temperature || 0.7;
     document.getElementById('temperature-slider').value = Math.round(temp * 100);
     document.getElementById('temperature-input').value = temp;
     applyFullscreen(s.fullscreen);
+    applyNotchVisibility(s.hideNotch === true);
     updateNotificationPermissionStatusUI();
     applyKeepAliveAudioState();
     syncBackgroundRuntimeByVisibility();
@@ -1648,6 +1652,7 @@ function saveSettings() {
         model: document.getElementById('model-name').value,
         prompt: document.getElementById('system-prompt').value,
         fullscreen: document.getElementById('fullscreen-toggle').checked,
+        hideNotch: document.getElementById('hide-notch-toggle').checked,
         temperature: temperature,
         keepAliveEnabled: document.getElementById('keep-alive-toggle').checked,
         notificationPermissionGranted: current.notificationPermissionGranted === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted')
@@ -1770,6 +1775,8 @@ async function testBrowserNotificationStatus() {
 
 function toggleFullscreen() { const isChecked = document.getElementById('fullscreen-toggle').checked; applyFullscreen(isChecked); const s = DB.getSettings(); s.fullscreen = isChecked; DB.saveSettings(s); }
 function applyFullscreen(isFull) { if (isFull) document.body.classList.add('fullscreen-mode'); else document.body.classList.remove('fullscreen-mode'); }
+function toggleNotchVisibility() { const isChecked = document.getElementById('hide-notch-toggle').checked; applyNotchVisibility(isChecked); const s = DB.getSettings(); s.hideNotch = isChecked; DB.saveSettings(s); }
+function applyNotchVisibility(hideNotch) { const notch = document.querySelector('.notch'); if (!notch) return; notch.style.display = hideNotch ? 'none' : ''; }
 async function fetchModels(btn) { const url = document.getElementById('api-url').value.replace(/\/$/, ''); const key = document.getElementById('api-key').value; if (!url || !key) return alert("请先填写 API Base URL 和 API Key"); const originalText = btn.innerText; btn.innerText = "加载中..."; btn.disabled = true; try { const res = await fetch(`${url}/models`, { method: 'GET', headers: { 'Authorization': `Bearer ${key}` } }); if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`); const data = await res.json(); const models = Array.isArray(data) ? data : (data.data || []); const select = document.getElementById('model-select'); select.innerHTML = '<option value="">-- 请选择模型 --</option>'; models.sort((a, b) => (a.id || a).localeCompare(b.id || b)); models.forEach(m => { const modelId = typeof m === 'string' ? m : m.id; const opt = document.createElement('option'); opt.value = modelId; opt.innerText = modelId; select.appendChild(opt); }); select.style.display = 'block'; btn.innerText = "拉取成功"; setTimeout(() => { btn.innerText = originalText; btn.disabled = false; }, 2000); } catch (e) { alert("拉取失败: " + e.message); btn.innerText = originalText; btn.disabled = false; } }
 function selectModel(sel) { if (sel.value) document.getElementById('model-name').value = sel.value; }
 function exportBackup() { const backupData = { settings: DB.getSettings(), contacts: DB.getContacts(), chats: DB.getChats(), worldbook: DB.getWorldBook(), spyData: DB.getSpyData(), theme: DB.getTheme(), memories: DB.getMemories(), calendar: DB.getCalendarEvents(), coupleData: DB.getCoupleData(), stickers: DB.getStickers(), questionBoxData: DB.getQuestionBox(), musicData: DB.getMusicList(), forumData: DB.getForumData(), tomatoData: DB.getTomatoData(), gameData: DB.getGameData(), userAccounts: DB.getUserAccounts(), walletData: DB.getWalletData(), timestamp: Date.now() }; const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData)); const a = document.createElement('a'); a.href = dataStr; a.download = "iphone_sim_backup_" + new Date().toISOString().slice(0,10) + ".json"; document.body.appendChild(a); a.click(); a.remove(); }
@@ -10143,7 +10150,7 @@ function resetSpyTheme() {
 
 function getDefaultSpyIconMarkup(iconId, label) {
     const iconMap = {
-        'spy-icon-vk': `<div class="spy-icon-graphic"><img src="https://picui.ogmua.cn/s1/2026/03/26/69c54c5c811c0.webp" alt="Vkontakte"></div>`,
+        'spy-icon-vk': `<div class="spy-icon-graphic"><img src="https://img.cdn1.vip/i/6a02ad3833ea4_1778560312.jpg" alt="Vkontakte"></div>`,
         'spy-icon-memos': `<div class="spy-icon-graphic"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/></svg></div>`,
         'spy-icon-browser': `<div class="spy-icon-graphic"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></svg></div>`,
         'spy-icon-diary': `<div class="spy-icon-graphic"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M16 2v20"/></svg></div>`,
