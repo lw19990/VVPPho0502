@@ -3914,6 +3914,13 @@ function openChatSettings() {
     const us = currentChatContact.userSettings || {};
     updateChatUserAccountOptions(currentChatContact.userAccountId);
     document.getElementById('time-perception-toggle').checked = us.enableTimePerception || false;
+    const thoughtMode = us.thoughtMode || 'default';
+    const defaultThoughtToggle = document.getElementById('thought-mode-default-toggle');
+    const longThoughtToggle = document.getElementById('thought-mode-long-toggle');
+    if (defaultThoughtToggle && longThoughtToggle) {
+        defaultThoughtToggle.checked = thoughtMode !== 'long_chain';
+        longThoughtToggle.checked = thoughtMode === 'long_chain';
+    }
     document.getElementById('html-theater-toggle').checked = us.enableHtmlTheater === true;
     document.getElementById('role-currency-unit-select').value = us.currencyUnit || 'cny';
     document.getElementById('auto-summary-toggle').checked = us.autoSummaryEnabled !== false;
@@ -3936,6 +3943,27 @@ function openChatSettings() {
         document.getElementById('theme-chat-bg-url').value = '';
     }
 }
+
+function handleThoughtModeToggle(mode) {
+    const defaultToggle = document.getElementById('thought-mode-default-toggle');
+    const longToggle = document.getElementById('thought-mode-long-toggle');
+    if (!defaultToggle || !longToggle) return;
+
+    if (mode === 'long_chain') {
+        if (longToggle.checked) {
+            defaultToggle.checked = false;
+        } else {
+            defaultToggle.checked = true;
+        }
+    } else {
+        if (defaultToggle.checked) {
+            longToggle.checked = false;
+        } else {
+            longToggle.checked = true;
+        }
+    }
+}
+
 function switchChatBgType(type) { currentChatBgType = type; document.getElementById('chat-bg-type-color').classList.toggle('active', type === 'color'); document.getElementById('chat-bg-type-image').classList.toggle('active', type === 'image'); document.getElementById('chat-bg-input-color').style.display = type === 'color' ? 'block' : 'none'; document.getElementById('chat-bg-input-image').style.display = type === 'image' ? 'block' : 'none'; }
 function renderBindWorldBookList() { const l = document.getElementById('bind-wb-list'); l.innerHTML = ''; const wb = DB.getWorldBook(); const local = wb.entries.filter(e => e.type === 'local'); const bound = currentChatContact.boundWorldBooks || []; if (local.length === 0) { l.innerHTML = '<div style="padding:10px;color:#999;font-size:12px;">暂无局部世界书</div>'; return; } local.forEach(en => { const d = document.createElement('div'); d.className = 'bind-wb-item'; d.innerHTML = `<input type="checkbox" value="${en.id}" id="wb-bind-${en.id}" ${bound.includes(en.id.toString()) ? 'checked' : ''}><label for="wb-bind-${en.id}">${en.title}</label>`; l.appendChild(d); }); }
 function closeChatSettings() { saveChatUserSettings(); document.getElementById('ctx-overlay').classList.remove('active'); document.getElementById('chat-settings-modal').classList.remove('active'); }
@@ -3946,6 +3974,8 @@ function saveChatUserSettings() {
     const selectedAccountId = document.getElementById('chat-user-account-select').value;
     const selectedAccount = getUserAccountById(selectedAccountId) || getPreferredUserAccount();
     const enableTime = document.getElementById('time-perception-toggle').checked;
+    const enableLongThoughtMode = document.getElementById('thought-mode-long-toggle')?.checked === true;
+    const thoughtMode = enableLongThoughtMode ? 'long_chain' : 'default';
     const enableHtmlTheater = document.getElementById('html-theater-toggle').checked;
     const currencyUnit = document.getElementById('role-currency-unit-select').value || 'cny';
     const autoSummary = document.getElementById('auto-summary-toggle').checked;
@@ -3973,6 +4003,7 @@ function saveChatUserSettings() {
                 userPersona,
                 userAvatar,
                 enableTimePerception: enableTime,
+                thoughtMode,
                 enableHtmlTheater: enableHtmlTheater,
                 currencyUnit,
                 autoSummaryEnabled: autoSummary,
@@ -6331,7 +6362,7 @@ async function triggerAIResponse(options = {}) {
         document.getElementById('typing-indicator').style.display = 'block';
     }
 
-    // 添加60秒超时保护
+    // 添加150秒超时保护
     const timeoutId = setTimeout(() => {
         if (isCallActive) {
             document.getElementById('call-status').innerText = "连接超时";
@@ -6341,7 +6372,7 @@ async function triggerAIResponse(options = {}) {
             document.getElementById('typing-indicator').style.display = 'none';
         }
         alert('请求超时，请检查网络连接或稍后重试');
-    }, 60000);
+    }, 150000);
 
     let allChats = DB.getChats();
     let history = allChats[currentChatContact.id] || [];
@@ -6350,6 +6381,7 @@ async function triggerAIResponse(options = {}) {
     const autoSummaryEnabled = userSettings.autoSummaryEnabled !== false;
     const summaryInterval = Math.max(1, Number(userSettings.summaryInterval) || 50);
     const htmlTheaterEnabled = userSettings.enableHtmlTheater === true && !isCallActive && !isOfflineActive;
+    const isLongChainThoughtMode = userSettings.thoughtMode === 'long_chain';
     const limitedHistory = history.slice(-contextLimit);
     const historyOffset = history.length - limitedHistory.length;
 
@@ -6507,7 +6539,11 @@ async function triggerAIResponse(options = {}) {
         const offSet = currentChatContact.offlineSettings || { min: 500, max: 700, style: '' };
         systemContent += `\n\n===== 【线下见面模式】 =====\n现在你和用户正在线下见面，面对面交流。\n**重要规则**：\n1. **严禁**使用 '|||' 分隔消息。\n2. 请使用小说般的描写手法，包含详细的动作描写、神态描写、环境描写和心理描写。\n3. 字数要求：${offSet.min} - ${offSet.max} 字。\n4. 文风要求：${offSet.style || '细腻、沉浸感强'}\n5. 必须在回复前生成心声。\n格式：[THOUGHTS: 心声] ||| 长篇描写回复内容`;
     } else {
-        systemContent += `\n\n===== 【强制回复格式】 =====\n你必须在每次回复的**最开始**生成一段内心独白（心声），展示你此刻真实的心理活动、情绪或对用户的看法。心声必须包裹在 [THOUGHTS: ...] 中，且不超过100字。心声之后，使用 ||| 分隔，然后才是你对用户的实际回复。\n格式示例：\n[THOUGHTS: 他怎么突然问这个？有点害羞...] ||| 呃，这个嘛... ||| 其实我也不太清楚。`;
+        if (isLongChainThoughtMode) {
+            systemContent += `\n\n===== 【强制回复格式 - 仿思考链长心声模式】 =====\n你必须在每次回复的**最开始**生成一段“仿思考链长心声”，且仅输出一段。心声必须包裹在 [THOUGHTS: ...] 中，然后使用 ||| 分隔，再输出你对用户的实际回复。\n\n【长心声硬性要求】\n1. 心声字数必须在 100 到 300 字之间。\n2. 必须紧贴当前角色人设、当前对话语境、以及你这一次即将给出的回复内容。\n3. 心声必须像在脑海里自言自语：自然、跳跃、带一点碎碎念感，可以短暂跑题后再拉回，不要像条目分析。\n4. 可以出现情绪外露、自我打断、犹豫摇摆、临时改变主意，必须体现角色当下最真实的感受和想法。\n5. 严禁把心声写成冷冰冰的总结、步骤、提纲或“我将如何回答”的说明书。\n6. 心声与正文语气可以不同，但都必须符合角色设定。\n\n格式示例：\n[THOUGHTS: （100-300字的真实内心独白，允许碎碎念和情绪波动）] ||| 你的实际回复内容`;
+        } else {
+            systemContent += `\n\n===== 【强制回复格式】 =====\n你必须在每次回复的**最开始**生成一段内心独白（心声），展示你此刻真实的心理活动、情绪或对用户的看法。心声必须包裹在 [THOUGHTS: ...] 中，且不超过100字。心声之后，使用 ||| 分隔，然后才是你对用户的实际回复。\n格式示例：\n[THOUGHTS: 他怎么突然问这个？有点害羞...] ||| 呃，这个嘛... ||| 其实我也不太清楚。`;
+        }
         if (htmlTheaterEnabled) {
             systemContent += `\n\n===== 【html小剧场模式已开启】 =====\n在本次正文回复全部输出完后，你还必须再输出一个 html 小剧场，且仅输出一个，格式严格如下：\n[HTML_THEATER]\n<div style="...">...</div>\n[/HTML_THEATER]\n\n小剧场规则：\n1. 纯 HTML + 行内 CSS，禁止 <script>、禁止 <style>、禁止外链。\n2. 宽度不超过 280px。\n3. 必须有可触发且可反向切换的交互（推荐 details/summary）。\n4. 必须第一人称中文，禁止重复正文原句，允许延展剧情或补全背景。\n5. 视觉要生动：圆角、阴影、渐变、层叠、磨砂玻璃质感可组合，可适度颜文字。\n6. 禁止在 HTML 代码中使用 |||。\n7. 小剧场中的按钮/标签/交互文案必须中文。`;
         }
@@ -6534,7 +6570,7 @@ async function triggerAIResponse(options = {}) {
         
         // 使用 AbortController 实现请求超时控制
         const controller = new AbortController();
-        const fetchTimeout = setTimeout(() => controller.abort(), 55000); // 55秒后中断请求
+        const fetchTimeout = setTimeout(() => controller.abort(), 150000); // 150秒后中断请求
         
         const response = await fetch(`${settings.url}/chat/completions`, { 
             method: 'POST', 

@@ -1081,6 +1081,16 @@
                         <label class="switch"><input type="checkbox" id="time-perception-toggle"><span class="slider"></span></label>
                     </div>
                     <div style="font-size:11px; color:#888; margin-bottom:20px;">开启后，AI 将知道当前现实时间，并根据作息和回复间隔做出反应。</div>
+                    <div class="settings-section-title" style="margin-top:-2px;">心声模式设置</div>
+                    <div class="toggle-switch" style="margin-top:-4px;">
+                        <span class="toggle-label" style="font-size:14px; font-weight:bold;">默认心声模式</span>
+                        <label class="switch"><input type="checkbox" id="thought-mode-default-toggle" onchange="handleThoughtModeToggle('default')"><span class="slider"></span></label>
+                    </div>
+                    <div class="toggle-switch" style="margin-top:-5px;">
+                        <span class="toggle-label" style="font-size:14px; font-weight:bold;">仿思考链长心声模式</span>
+                        <label class="switch"><input type="checkbox" id="thought-mode-long-toggle" onchange="handleThoughtModeToggle('long_chain')"><span class="slider"></span></label>
+                    </div>
+                    <div style="font-size:11px; color:#888; margin-bottom:20px;">两个开关只能二选一。开启仿思考链长心声后，角色会输出更长、更真实的内心独白。</div>
                     <div class="toggle-switch" style="margin-top:-5px;">
                         <span class="toggle-label" style="font-size:14px; font-weight:bold;">开启 html小剧场</span>
                         <label class="switch"><input type="checkbox" id="html-theater-toggle"><span class="slider"></span></label>
