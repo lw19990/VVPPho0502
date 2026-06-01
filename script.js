@@ -688,6 +688,7 @@ function closeAllOverlays() {
     document.getElementById('voice-modal')?.classList.remove('active');
     stopVoiceRecognition();
     document.getElementById('thoughts-modal').classList.remove('active');
+    document.getElementById('offline-status-panel')?.classList.remove('active');
     document.getElementById('offline-settings-modal').classList.remove('active');
     document.getElementById('calendar-event-modal').classList.remove('active');
     document.getElementById('offline-edit-modal').classList.remove('active');
@@ -884,6 +885,7 @@ const DB = {
             prompt: DEFAULT_SYSTEM_PROMPT,
             fullscreen: true,
             hideNotch: false,
+            hideStatusInfo: false,
             temperature: 0.7,
             keepAliveEnabled: false,
             notificationPermissionGranted: false
@@ -892,6 +894,7 @@ const DB = {
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
         if (saved.fullscreen === undefined) saved.fullscreen = true;
         if (saved.hideNotch === undefined) saved.hideNotch = false;
+        if (saved.hideStatusInfo === undefined) saved.hideStatusInfo = false;
         if (saved.temperature === undefined) saved.temperature = 0.7;
         if (saved.keepAliveEnabled === undefined) saved.keepAliveEnabled = false;
         if (saved.notificationPermissionGranted === undefined) saved.notificationPermissionGranted = false;
@@ -1630,12 +1633,14 @@ function loadSettings() {
     document.getElementById('system-prompt').value = s.prompt;
     document.getElementById('fullscreen-toggle').checked = s.fullscreen;
     document.getElementById('hide-notch-toggle').checked = s.hideNotch === true;
+    document.getElementById('hide-status-info-toggle').checked = s.hideStatusInfo === true;
     document.getElementById('keep-alive-toggle').checked = s.keepAliveEnabled === true;
     const temp = s.temperature || 0.7;
     document.getElementById('temperature-slider').value = Math.round(temp * 100);
     document.getElementById('temperature-input').value = temp;
     applyFullscreen(s.fullscreen);
     applyNotchVisibility(s.hideNotch === true);
+    applyStatusInfoVisibility(s.hideStatusInfo === true);
     updateNotificationPermissionStatusUI();
     applyKeepAliveAudioState();
     syncBackgroundRuntimeByVisibility();
@@ -1653,6 +1658,7 @@ function saveSettings() {
         prompt: document.getElementById('system-prompt').value,
         fullscreen: document.getElementById('fullscreen-toggle').checked,
         hideNotch: document.getElementById('hide-notch-toggle').checked,
+        hideStatusInfo: document.getElementById('hide-status-info-toggle').checked,
         temperature: temperature,
         keepAliveEnabled: document.getElementById('keep-alive-toggle').checked,
         notificationPermissionGranted: current.notificationPermissionGranted === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted')
@@ -1777,6 +1783,8 @@ function toggleFullscreen() { const isChecked = document.getElementById('fullscr
 function applyFullscreen(isFull) { if (isFull) document.body.classList.add('fullscreen-mode'); else document.body.classList.remove('fullscreen-mode'); }
 function toggleNotchVisibility() { const isChecked = document.getElementById('hide-notch-toggle').checked; applyNotchVisibility(isChecked); const s = DB.getSettings(); s.hideNotch = isChecked; DB.saveSettings(s); }
 function applyNotchVisibility(hideNotch) { const notch = document.querySelector('.notch'); if (!notch) return; notch.style.display = hideNotch ? 'none' : ''; }
+function toggleStatusInfoVisibility() { const isChecked = document.getElementById('hide-status-info-toggle').checked; applyStatusInfoVisibility(isChecked); const s = DB.getSettings(); s.hideStatusInfo = isChecked; DB.saveSettings(s); }
+function applyStatusInfoVisibility(hideStatusInfo) { const clock = document.getElementById('clock-time'); const battery = document.getElementById('battery-level'); if (clock) clock.style.display = hideStatusInfo ? 'none' : ''; if (battery) battery.style.display = hideStatusInfo ? 'none' : ''; }
 async function fetchModels(btn) { const url = document.getElementById('api-url').value.replace(/\/$/, ''); const key = document.getElementById('api-key').value; if (!url || !key) return alert("请先填写 API Base URL 和 API Key"); const originalText = btn.innerText; btn.innerText = "加载中..."; btn.disabled = true; try { const res = await fetch(`${url}/models`, { method: 'GET', headers: { 'Authorization': `Bearer ${key}` } }); if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`); const data = await res.json(); const models = Array.isArray(data) ? data : (data.data || []); const select = document.getElementById('model-select'); select.innerHTML = '<option value="">-- 请选择模型 --</option>'; models.sort((a, b) => (a.id || a).localeCompare(b.id || b)); models.forEach(m => { const modelId = typeof m === 'string' ? m : m.id; const opt = document.createElement('option'); opt.value = modelId; opt.innerText = modelId; select.appendChild(opt); }); select.style.display = 'block'; btn.innerText = "拉取成功"; setTimeout(() => { btn.innerText = originalText; btn.disabled = false; }, 2000); } catch (e) { alert("拉取失败: " + e.message); btn.innerText = originalText; btn.disabled = false; } }
 function selectModel(sel) { if (sel.value) document.getElementById('model-name').value = sel.value; }
 function exportBackup() { const backupData = { settings: DB.getSettings(), contacts: DB.getContacts(), chats: DB.getChats(), worldbook: DB.getWorldBook(), spyData: DB.getSpyData(), theme: DB.getTheme(), memories: DB.getMemories(), calendar: DB.getCalendarEvents(), coupleData: DB.getCoupleData(), stickers: DB.getStickers(), questionBoxData: DB.getQuestionBox(), musicData: DB.getMusicList(), forumData: DB.getForumData(), tomatoData: DB.getTomatoData(), gameData: DB.getGameData(), userAccounts: DB.getUserAccounts(), walletData: DB.getWalletData(), timestamp: Date.now() }; const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData)); const a = document.createElement('a'); a.href = dataStr; a.download = "iphone_sim_backup_" + new Date().toISOString().slice(0,10) + ".json"; document.body.appendChild(a); a.click(); a.remove(); }
@@ -5504,7 +5512,7 @@ function extractBackgroundReplyParts(rawContent) {
     content = content.replace(/\[HTML_THEATER\][\s\S]*?\[\/HTML_THEATER\]/gi, '').trim();
     const parts = content.split('|||').map(p => p.trim()).filter(Boolean);
     if (parts.length === 0 && content) parts.push(content);
-    return { thought, parts };
+    return { thought, parts: normalizeSingleSendAtPrefixParts(parts, { ensureFirstPrefix: true }) };
 }
 
 async function triggerBackgroundAutoReplyForContact(contact) {
@@ -5637,6 +5645,36 @@ function stripLeadingLeakedTimePrefix(text) {
         content = content.replace(LEAKED_TIME_PREFIX_REGEX, '');
     }
     return content.trim();
+}
+
+function formatSendAtPrefix(timestamp = Date.now()) {
+    const d = new Date(timestamp);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `[发送于：${y}/${m}/${day} ${hh}:${mm}:${ss}]`;
+}
+
+function normalizeSingleSendAtPrefixParts(parts, options = {}) {
+    const ensureFirstPrefix = options.ensureFirstPrefix !== false;
+    const normalized = (Array.isArray(parts) ? parts : [])
+        .map(p => String(p || '').trim())
+        .filter(Boolean);
+    if (normalized.length === 0) return [];
+
+    for (let i = 1; i < normalized.length; i++) {
+        normalized[i] = stripLeadingLeakedTimePrefix(normalized[i]);
+    }
+
+    const firstBody = stripLeadingLeakedTimePrefix(normalized[0]);
+    normalized[0] = ensureFirstPrefix
+        ? `${formatSendAtPrefix()} ${firstBody}`.trim()
+        : firstBody;
+
+    return normalized.filter(Boolean);
 }
 
 function extractThoughtAndBody(rawContent) {
@@ -6077,6 +6115,93 @@ function setOfflineModeBackground(bgUrl) {
     if (offlineRainRenderer) offlineRainRenderer.setImage(bgUrl || '');
 }
 
+function extractOfflineStatusBlock(rawContent) {
+    const text = String(rawContent || '');
+    const map = {
+        mood: '',
+        outfit: '',
+        action: '',
+        inner: ''
+    };
+    const patterns = [
+        { key: 'mood', regex: /(?:【\s*心情\s*】|心情\s*[：:])\s*([\s\S]*?)(?=(?:【\s*服装状态\s*】|服装状态\s*[：:]|【\s*动作\s*】|动作\s*[：:]|【\s*心声独白\s*】|心声独白\s*[：:]|$))/i },
+        { key: 'outfit', regex: /(?:【\s*服装状态\s*】|服装状态\s*[：:])\s*([\s\S]*?)(?=(?:【\s*动作\s*】|动作\s*[：:]|【\s*心声独白\s*】|心声独白\s*[：:]|$))/i },
+        { key: 'action', regex: /(?:【\s*动作\s*】|动作\s*[：:])\s*([\s\S]*?)(?=(?:【\s*心声独白\s*】|心声独白\s*[：:]|$))/i },
+        { key: 'inner', regex: /(?:【\s*心声独白\s*】|心声独白\s*[：:])\s*([\s\S]*?)$/i }
+    ];
+    patterns.forEach(item => {
+        const match = text.match(item.regex);
+        if (match && match[1]) {
+            map[item.key] = match[1].replace(/\n+/g, ' ').trim();
+        }
+    });
+    return map;
+}
+
+function parseOfflineReplyPayload(rawContent) {
+    const text = String(rawContent || '').replace(/\r/g, '').trim();
+    const status = extractOfflineStatusBlock(text);
+    let body = text;
+
+    const bodySectionMatch = text.match(/(?:^|\n)\s*(?:\[?正文\]?|【正文】)\s*[:：]?\s*([\s\S]*?)(?=\n\s*(?:\[?状态栏\]?|【状态栏】|【\s*心情\s*】|心情\s*[：:])|$)/i);
+    if (bodySectionMatch && bodySectionMatch[1]) {
+        body = bodySectionMatch[1].trim();
+    } else {
+        const statusStartIndex = text.search(/(?:^|\n)\s*(?:\[?状态栏\]?|【状态栏】|【\s*心情\s*】|心情\s*[：:])/i);
+        if (statusStartIndex >= 0) body = text.slice(0, statusStartIndex).trim();
+    }
+
+    body = body
+        .replace(/^\s*(?:\[?正文\]?|【正文】)\s*[:：]\s*/i, '')
+        .replace(/\n?\s*(?:\[?状态栏\]?|【状态栏】)\s*[:：]?\s*$/i, '')
+        .trim();
+
+    if (!body) {
+        body = '他看着你，停顿了片刻，像是在认真消化你刚才的话。';
+    }
+
+    return { body, status };
+}
+
+function updateOfflineStatusBar(status) {
+    const fallback = '暂无';
+    const moodEl = document.getElementById('offline-status-mood');
+    const outfitEl = document.getElementById('offline-status-outfit');
+    const actionEl = document.getElementById('offline-status-action');
+    const innerEl = document.getElementById('offline-status-inner');
+    if (!moodEl || !outfitEl || !actionEl || !innerEl) return;
+    moodEl.innerText = status?.mood || fallback;
+    outfitEl.innerText = status?.outfit || fallback;
+    actionEl.innerText = status?.action || fallback;
+    innerEl.innerText = status?.inner || fallback;
+}
+
+function refreshOfflineStatusBarFromChat() {
+    if (!currentChatContact) return;
+    const chat = DB.getChats()[currentChatContact.id] || [];
+    let latestStatus = null;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (msg && msg.role === 'assistant' && msg.mode === 'offline' && msg.offlineStatus) {
+            latestStatus = msg.offlineStatus;
+            break;
+        }
+    }
+    updateOfflineStatusBar(latestStatus || {});
+}
+
+function toggleOfflineStatusBar(forceOpen) {
+    const panel = document.getElementById('offline-status-panel');
+    if (!panel) return;
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !panel.classList.contains('active');
+    if (shouldOpen) {
+        refreshOfflineStatusBarFromChat();
+        panel.classList.add('active');
+    } else {
+        panel.classList.remove('active');
+    }
+}
+
 function ensureOfflineRainRenderer() {
     if (offlineRainRenderer) return offlineRainRenderer;
     const container = document.getElementById('offline-rain-gl');
@@ -6107,12 +6232,15 @@ function openOfflineMode() {
         renderer.setRainAmount(0.82);
         renderer.start();
     }
+    refreshOfflineStatusBarFromChat();
+    toggleOfflineStatusBar(false);
     renderChatHistory();
 }
 
 function exitOfflineMode() {
     document.getElementById('offline-mode').classList.remove('active');
     document.getElementById('offline-typing-indicator').style.display = 'none';
+    toggleOfflineStatusBar(false);
     closeOfflineSettings();
     if (offlineRainRenderer) offlineRainRenderer.stop();
 }
@@ -6189,7 +6317,25 @@ function saveOfflineSettings() {
         processSave(null); 
     } 
 }
-function toggleThoughts() { const modal = document.getElementById('thoughts-modal'); if (modal.classList.contains('active')) { modal.classList.remove('active'); } else { const chat = DB.getChats()[currentChatContact.id] || []; let lastThought = "暂无心声..."; for (let i = chat.length - 1; i >= 0; i--) { if (chat[i].role === 'assistant' && chat[i].thought) { lastThought = chat[i].thought; break; } } document.getElementById('thoughts-text').innerText = lastThought; modal.classList.add('active'); } }
+function toggleThoughts() {
+    const offlineModeEl = document.getElementById('offline-mode');
+    if (offlineModeEl?.classList.contains('active')) return;
+    const modal = document.getElementById('thoughts-modal');
+    if (modal.classList.contains('active')) {
+        modal.classList.remove('active');
+    } else {
+        const chat = DB.getChats()[currentChatContact.id] || [];
+        let lastThought = "暂无心声...";
+        for (let i = chat.length - 1; i >= 0; i--) {
+            if (chat[i].role === 'assistant' && chat[i].thought) {
+                lastThought = chat[i].thought;
+                break;
+            }
+        }
+        document.getElementById('thoughts-text').innerText = lastThought;
+        modal.classList.add('active');
+    }
+}
 function isSummarizableChatMessage(msg) {
     if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) return false;
     const excludedTypes = ['transfer_receipt', 'redpacket_receipt', 'pay_invite_receipt', 'gift_receipt', 'call_end'];
@@ -6537,12 +6683,12 @@ async function triggerAIResponse(options = {}) {
         systemContent += `\n\n===== 【语音通话模式】 =====\n现在你正在和用户进行语音通话。\n**重要规则**：\n1. 请像打电话一样回复，保持口语化。\n2. **严禁**使用 '|||' 分隔消息。\n3. 一次只回复一段话，字数限制在150字以内。\n4. 必须在回复前生成心声。\n格式：[THOUGHTS: 心声] ||| 回复内容`;
     } else if (isOfflineActive) {
         const offSet = currentChatContact.offlineSettings || { min: 500, max: 700, style: '' };
-        systemContent += `\n\n===== 【线下见面模式】 =====\n现在你和用户正在线下见面，面对面交流。\n**重要规则**：\n1. **严禁**使用 '|||' 分隔消息。\n2. 请使用小说般的描写手法，包含详细的动作描写、神态描写、环境描写和心理描写。\n3. 字数要求：${offSet.min} - ${offSet.max} 字。\n4. 文风要求：${offSet.style || '细腻、沉浸感强'}\n5. 必须在回复前生成心声。\n格式：[THOUGHTS: 心声] ||| 长篇描写回复内容`;
+        systemContent += `\n\n===== 【线下见面模式】 =====\n现在你和用户正在线下见面，面对面交流。\n**重要规则**：\n1. 你必须同时输出“正文回复 + 状态栏”。\n2. **严禁**使用 '|||' 分隔消息。\n3. 请严格按下面结构输出（顺序不可变）：\n【正文】\n（这里写面对面互动的正文回复，允许叙事与对话）\n【状态栏】\n【心情】（简短描述角色此时的心情）\n【服装状态】（简短描述角色现在的衣着）\n【动作】（简短描述角色此时的动作）\n【心声独白】（100字以内）\n4. **字数硬性要求（只统计【正文】部分，不统计状态栏）**：正文必须在 ${offSet.min} 到 ${offSet.max} 字之间。\n5. 如果正文字数不在上述范围内，你必须先在内部重写，直到满足字数后再输出最终答案。\n6. 正文必须是线下场景的长文描写，包含动作、神态、环境细节与情绪推进，禁止退化成线上聊天式短句。\n7. 除“心声独白”外，其他三项保持简短（建议 10-30 字）。\n8. 正文文风要求：${offSet.style || '细腻、沉浸感强'}。\n9. 不得输出线上模式的 [THOUGHTS] 格式。`;
     } else {
         if (isLongChainThoughtMode) {
-            systemContent += `\n\n===== 【强制回复格式 - 仿思考链长心声模式】 =====\n你必须在每次回复的**最开始**生成一段“仿思考链长心声”，且仅输出一段。心声必须包裹在 [THOUGHTS: ...] 中，然后使用 ||| 分隔，再输出你对用户的实际回复。\n\n【长心声硬性要求】\n1. 心声字数必须在 100 到 300 字之间。\n2. 心声只写“你收到用户这条消息后的第一反应和真实情绪波动”，必须像真人脑内自言自语。\n3. 严禁 AI 式分析、严禁策略化表达、严禁计划如何回复。不要出现“我应该怎么回/先说什么再说什么/这样回复更好/为了显得xxx”等元话术。\n4. 严禁把心声写成条目、提纲、总结、教程、复盘或任务分解。\n5. 允许情绪外露、犹豫、自我打断、短暂跑题，但核心必须是“当下反应”，不是“回复规划”。\n6. 必须正确使用中文标点符号（，。！？：；、“”），禁止整段无标点或标点混乱。\n7. 心声必须换行排版，至少分成 2-4 个短段落；每段建议 1-2 句，避免一整坨长段。\n8. 心声与正文语气可以不同，但都必须符合角色设定。\n\n格式示例：\n[THOUGHTS: 第一小段（真实反应）。\n第二小段（情绪波动）。\n第三小段（拉回当下）。] ||| 你的实际回复内容`;
+            systemContent += `\n\n===== 【强制回复格式 - 仿思考链长心声模式】 =====\n你必须在每次回复的**最开始**生成一段“仿思考链长心声”，且仅输出一段。心声必须包裹在 [THOUGHTS: ...] 中，然后使用 ||| 分隔，再输出你对用户的实际回复。\n\n【长心声硬性要求】\n1. 心声字数必须在 100 到 300 字之间。\n2. 心声只写“你收到用户这条消息后的第一反应和真实情绪波动”，必须像真人脑内自言自语。\n3. 严禁 AI 式分析、严禁策略化表达、严禁计划如何回复。不要出现“我应该怎么回/先说什么再说什么/这样回复更好/为了显得xxx”等元话术。\n4. 严禁把心声写成条目、提纲、总结、教程、复盘或任务分解。\n5. 允许情绪外露、犹豫、自我打断、短暂跑题，但核心必须是“当下反应”，不是“回复规划”。\n6. 必须正确使用中文标点符号（，。！？：；、“”），禁止整段无标点或标点混乱。\n7. 心声必须换行排版，至少分成 2-4 个短段落；每段建议 1-2 句，避免一整坨长段。\n8. 心声与正文语气可以不同，但都必须符合角色设定。\n9. 如果正文拆成多条（用 ||| 分隔），仅第一条消息开头允许出现一次时间前缀，格式固定为 [发送于：YYYY/M/D HH:MM:SS]，后续消息严禁重复该前缀。\n\n格式示例：\n[THOUGHTS: 第一小段（真实反应）。\n第二小段（情绪波动）。\n第三小段（拉回当下）。] ||| [发送于：2026/6/1 18:00:00] 你的第一条消息 ||| 你的第二条消息`;
         } else {
-            systemContent += `\n\n===== 【强制回复格式】 =====\n你必须在每次回复的**最开始**生成一段内心独白（心声），展示你此刻真实的心理活动、情绪或对用户的看法。心声必须包裹在 [THOUGHTS: ...] 中，且不超过100字。心声之后，使用 ||| 分隔，然后才是你对用户的实际回复。\n格式示例：\n[THOUGHTS: 他怎么突然问这个？有点害羞...] ||| 呃，这个嘛... ||| 其实我也不太清楚。`;
+            systemContent += `\n\n===== 【强制回复格式】 =====\n你必须在每次回复的**最开始**生成一段内心独白（心声），展示你此刻真实的心理活动、情绪或对用户的看法。心声必须包裹在 [THOUGHTS: ...] 中，且不超过100字。心声之后，使用 ||| 分隔，然后才是你对用户的实际回复。\n补充格式要求：如果正文拆成多条（用 ||| 分隔），仅第一条消息开头允许出现一次时间前缀，格式固定为 [发送于：YYYY/M/D HH:MM:SS]，后续消息严禁重复该前缀。\n格式示例：\n[THOUGHTS: 他怎么突然问这个？有点害羞...] ||| [发送于：2026/6/1 18:00:00] 呃，这个嘛... ||| 其实我也不太清楚。`;
         }
         if (htmlTheaterEnabled) {
             systemContent += `\n\n===== 【html小剧场模式已开启】 =====\n在本次正文回复全部输出完后，你还必须再输出一个 html 小剧场，且仅输出一个，格式严格如下：\n[HTML_THEATER]\n<div style="...">...</div>\n[/HTML_THEATER]\n\n小剧场规则：\n1. 纯 HTML + 行内 CSS，禁止 <script>、禁止 <style>、禁止外链。\n2. 宽度不超过 280px。\n3. 必须有可触发且可反向切换的交互（推荐 details/summary）。\n4. 必须第一人称中文，禁止重复正文原句，允许延展剧情或补全背景。\n5. 视觉要生动：圆角、阴影、渐变、层叠、磨砂玻璃质感可组合，可适度颜文字。\n6. 禁止在 HTML 代码中使用 |||。\n7. 小剧场中的按钮/标签/交互文案必须中文。`;
@@ -6607,6 +6753,13 @@ async function triggerAIResponse(options = {}) {
             const extracted = extractThoughtAndBody(content);
             let extractedThought = extracted.thought;
             content = extracted.content;
+            let offlineStatus = null;
+            if (isOfflineActive) {
+                const offlineParsed = parseOfflineReplyPayload(content);
+                content = offlineParsed.body;
+                offlineStatus = offlineParsed.status;
+                extractedThought = null;
+            }
 
             if (isTransferEvent) {
                 allChats = DB.getChats();
@@ -6752,9 +6905,22 @@ async function triggerAIResponse(options = {}) {
                 if (isCallActive || isOfflineActive) {
                     if (content) {
                         saveMessage('assistant', content, null, extractedThought);
+                        if (isOfflineActive) {
+                            const chats = DB.getChats();
+                            const contactChats = chats[currentChatContact.id] || [];
+                            const lastMsg = contactChats[contactChats.length - 1];
+                            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.mode === 'offline') {
+                                lastMsg.offlineStatus = offlineStatus || extractOfflineStatusBlock(content);
+                                DB.saveChats(chats);
+                            }
+                            refreshOfflineStatusBarFromChat();
+                        }
                     }
                 } else {
-                    const parts = content.split('|||').filter(p => p.trim()).map(p => p.trim());
+                    const parts = normalizeSingleSendAtPrefixParts(
+                        content.split('|||').filter(p => p.trim()).map(p => p.trim()),
+                        { ensureFirstPrefix: true }
+                    );
                     const finalPart = parts.length > 0 ? parts[parts.length - 1] : '';
                     const responseContactId = currentChatContact.id;
                     const responseCharacterName = currentChatContact.name;

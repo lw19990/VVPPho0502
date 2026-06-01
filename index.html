@@ -29,7 +29,7 @@
         <div class="notch"></div>
         <div class="status-bar">
             <span id="clock-time">12:00</span>
-            <span>100%</span>
+            <span id="battery-level">100%</span>
         </div>
 
         <!-- 1. 锁屏 -->
@@ -561,6 +561,10 @@
                     <span class="toggle-label">隐藏顶部刘海屏</span>
                     <label class="switch"><input type="checkbox" id="hide-notch-toggle" onchange="toggleNotchVisibility()"><span class="slider"></span></label>
                 </div>
+                <div class="toggle-switch">
+                    <span class="toggle-label">隐藏顶部时间与电量</span>
+                    <label class="switch"><input type="checkbox" id="hide-status-info-toggle" onchange="toggleStatusInfoVisibility()"><span class="slider"></span></label>
+                </div>
 
                 <hr class="theme-divider">
 
@@ -743,7 +747,20 @@
                 <div class="app-header offline-header-glass">
                     <div class="back-btn" onclick="exitOfflineMode()">退出</div>
                     <div class="app-title">线下见面</div>
-                    <div class="action-btn" onclick="openOfflineSettings()">⚙️</div>
+                    <div class="offline-header-actions">
+                        <button class="chat-header-icon-btn offline-status-icon-btn" onclick="toggleOfflineStatusBar()" aria-label="状态栏">
+                            <span class="chat-thought-toggle">❤</span>
+                        </button>
+                        <div class="action-btn" onclick="openOfflineSettings()">⚙️</div>
+                    </div>
+                </div>
+                <div id="offline-status-panel">
+                    <div class="offline-status-close" onclick="toggleOfflineStatusBar(false)">✕</div>
+                    <div class="offline-status-title">❤ 状态栏</div>
+                    <div class="offline-status-item"><strong>【心情】</strong><p id="offline-status-mood">暂无</p></div>
+                    <div class="offline-status-item"><strong>【服装状态】</strong><p id="offline-status-outfit">暂无</p></div>
+                    <div class="offline-status-item"><strong>【动作】</strong><p id="offline-status-action">暂无</p></div>
+                    <div class="offline-status-item"><strong>【心声独白】</strong><p id="offline-status-inner">暂无</p></div>
                 </div>
                 <div id="offline-history"></div>
                 
