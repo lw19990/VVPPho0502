@@ -1511,6 +1511,22 @@ input:checked + .slider:before { transform: translateX(22px); }
     color: #2e7d32;
     font-weight: bold;
 }
+.memo-import-export-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.memo-transfer-btn {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+.memo-import-export-tip {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 18px;
+}
 
 /* --- 表情包功能样式 --- */
 #sticker-panel {
