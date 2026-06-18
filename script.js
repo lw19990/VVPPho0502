@@ -690,6 +690,7 @@ function closeAllOverlays() {
     document.getElementById('thoughts-modal').classList.remove('active');
     document.getElementById('offline-status-panel')?.classList.remove('active');
     document.getElementById('offline-settings-modal').classList.remove('active');
+    document.getElementById('offline-bagua-modal')?.classList.remove('active');
     document.getElementById('calendar-event-modal').classList.remove('active');
     document.getElementById('offline-edit-modal').classList.remove('active');
     document.getElementById('memo-transfer-modal')?.classList.remove('active');
@@ -1094,6 +1095,62 @@ function runMemoryMaintenance(memoriesMap) {
     return changed;
 }
 
+function createOfflineBuzzwordRule(data = {}) {
+    return {
+        id: data.id || `offline-bagua-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        source: String(data.source || data.word || '').trim(),
+        mode: data.mode === 'replace' ? 'replace' : 'block',
+        replacement: String(data.replacement || data.replaceWith || '').trim()
+    };
+}
+
+const DEFAULT_OFFLINE_BUZZWORD_RULES = Object.freeze([
+    Object.freeze({ source: '极其', mode: 'block', replacement: '' }),
+    Object.freeze({ source: '脊背', mode: 'replace', replacement: '后背' })
+]);
+
+function getDefaultOfflineBuzzwordRules() {
+    return DEFAULT_OFFLINE_BUZZWORD_RULES.map(rule => createOfflineBuzzwordRule(rule));
+}
+
+function normalizeOfflineBuzzwordRules(rules) {
+    if (!Array.isArray(rules)) return [];
+    return rules.map(rule => createOfflineBuzzwordRule(rule)).filter(rule => rule.source);
+}
+
+function getOfflineBuzzwordRules() {
+    const settings = DB.getSettings();
+    return normalizeOfflineBuzzwordRules(settings.offlineBuzzwordRules);
+}
+
+function applyOfflineBuzzwordRulesToText(text, rules = []) {
+    let output = String(text || '');
+    rules.forEach(rule => {
+        if (!rule.source) return;
+        const replacement = rule.mode === 'replace' ? rule.replacement : '';
+        output = output.split(rule.source).join(replacement);
+    });
+    return output
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function applyOfflineBuzzwordRulesToStatus(status, rules = []) {
+    return {
+        mood: applyOfflineBuzzwordRulesToText(status?.mood || '', rules),
+        outfit: applyOfflineBuzzwordRulesToText(status?.outfit || '', rules),
+        action: applyOfflineBuzzwordRulesToText(status?.action || '', rules),
+        inner: applyOfflineBuzzwordRulesToText(status?.inner || '', rules)
+    };
+}
+
+function hasOfflineStatusContent(status) {
+    return Boolean(status && (status.mood || status.outfit || status.action || status.inner));
+}
+
+let offlineBuzzwordRuleDrafts = [];
+
 const DB = {
     getSettings: () => {
         const saved = MEMORY_CACHE['iphone_settings'];
@@ -1107,7 +1164,8 @@ const DB = {
             hideStatusInfo: false,
             temperature: 0.7,
             keepAliveEnabled: false,
-            notificationPermissionGranted: false
+            notificationPermissionGranted: false,
+            offlineBuzzwordRules: getDefaultOfflineBuzzwordRules()
         };
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
@@ -1117,6 +1175,8 @@ const DB = {
         if (saved.temperature === undefined) saved.temperature = 0.7;
         if (saved.keepAliveEnabled === undefined) saved.keepAliveEnabled = false;
         if (saved.notificationPermissionGranted === undefined) saved.notificationPermissionGranted = false;
+        if (saved.offlineBuzzwordRules === undefined) saved.offlineBuzzwordRules = getDefaultOfflineBuzzwordRules();
+        else saved.offlineBuzzwordRules = normalizeOfflineBuzzwordRules(saved.offlineBuzzwordRules);
         return saved;
     },
     saveSettings: (data) => {
@@ -6514,6 +6574,7 @@ function exitOfflineMode() {
     document.getElementById('offline-typing-indicator').style.display = 'none';
     toggleOfflineStatusBar(false);
     closeOfflineSettings();
+    closeOfflineBuzzwordTool();
     if (offlineRainRenderer) offlineRainRenderer.stop();
 }
 
@@ -6548,6 +6609,169 @@ function setOfflineInterrupt(value) {
     document.getElementById('offline-interrupt-no').classList.toggle('active', value !== true);
 }
 function closeOfflineSettings() { document.getElementById('offline-settings-modal').classList.remove('active'); document.getElementById('ctx-overlay').classList.remove('active'); }
+function renderOfflineBuzzwordRuleList() {
+    const list = document.getElementById('offline-bagua-list');
+    const empty = document.getElementById('offline-bagua-empty');
+    if (!list || !empty) return;
+    list.innerHTML = '';
+    offlineBuzzwordRuleDrafts.forEach((rule, index) => {
+        const row = document.createElement('div');
+        row.className = 'offline-bagua-row';
+
+        const sourceInput = document.createElement('input');
+        sourceInput.type = 'text';
+        sourceInput.placeholder = '输入要处理的词';
+        sourceInput.value = rule.source || '';
+        sourceInput.oninput = (event) => {
+            offlineBuzzwordRuleDrafts[index].source = event.target.value;
+        };
+
+        const modeSelect = document.createElement('select');
+        const blockOption = document.createElement('option');
+        blockOption.value = 'block';
+        blockOption.textContent = '屏蔽';
+        const replaceOption = document.createElement('option');
+        replaceOption.value = 'replace';
+        replaceOption.textContent = '替换';
+        modeSelect.appendChild(blockOption);
+        modeSelect.appendChild(replaceOption);
+        modeSelect.value = rule.mode === 'replace' ? 'replace' : 'block';
+
+        const replacementInput = document.createElement('input');
+        replacementInput.type = 'text';
+        replacementInput.placeholder = modeSelect.value === 'replace' ? '输入替换词' : '屏蔽模式留空';
+        replacementInput.value = rule.replacement || '';
+        replacementInput.disabled = modeSelect.value !== 'replace';
+        replacementInput.oninput = (event) => {
+            offlineBuzzwordRuleDrafts[index].replacement = event.target.value;
+        };
+
+        modeSelect.onchange = (event) => {
+            const mode = event.target.value === 'replace' ? 'replace' : 'block';
+            offlineBuzzwordRuleDrafts[index].mode = mode;
+            if (mode === 'block') offlineBuzzwordRuleDrafts[index].replacement = '';
+            replacementInput.disabled = mode !== 'replace';
+            replacementInput.placeholder = mode === 'replace' ? '输入替换词' : '屏蔽模式留空';
+            replacementInput.value = offlineBuzzwordRuleDrafts[index].replacement || '';
+        };
+
+        row.appendChild(sourceInput);
+        row.appendChild(modeSelect);
+        row.appendChild(replacementInput);
+        list.appendChild(row);
+    });
+    empty.classList.toggle('active', offlineBuzzwordRuleDrafts.length === 0);
+}
+
+function normalizeOfflineBuzzwordRuleDraftsForSave(rules) {
+    const normalized = [];
+    for (let i = 0; i < rules.length; i++) {
+        const rule = createOfflineBuzzwordRule(rules[i]);
+        const isCompletelyEmpty = !rule.source && !rule.replacement;
+        if (isCompletelyEmpty) continue;
+        if (!rule.source) {
+            alert(`第 ${i + 1} 行未填写需要处理的词汇`);
+            return null;
+        }
+        if (rule.mode === 'replace' && !rule.replacement) {
+            alert(`第 ${i + 1} 行选择了“替换”，必须填写替换词`);
+            return null;
+        }
+        if (rule.mode === 'block') rule.replacement = '';
+        normalized.push(rule);
+    }
+    return normalized;
+}
+
+function openOfflineBuzzwordTool() {
+    offlineBuzzwordRuleDrafts = getOfflineBuzzwordRules().map(rule => createOfflineBuzzwordRule(rule));
+    renderOfflineBuzzwordRuleList();
+    document.getElementById('offline-bagua-modal')?.classList.add('active');
+}
+
+function closeOfflineBuzzwordTool() {
+    document.getElementById('offline-bagua-modal')?.classList.remove('active');
+    const input = document.getElementById('offline-bagua-import-input');
+    if (input) input.value = '';
+}
+
+function addOfflineBuzzwordRule() {
+    offlineBuzzwordRuleDrafts.push(createOfflineBuzzwordRule());
+    renderOfflineBuzzwordRuleList();
+}
+
+function removeOfflineBuzzwordRule() {
+    if (offlineBuzzwordRuleDrafts.length === 0) return;
+    offlineBuzzwordRuleDrafts.pop();
+    renderOfflineBuzzwordRuleList();
+}
+
+function saveOfflineBuzzwordRules() {
+    const normalized = normalizeOfflineBuzzwordRuleDraftsForSave(offlineBuzzwordRuleDrafts);
+    if (!normalized) return;
+    const settings = DB.getSettings();
+    settings.offlineBuzzwordRules = normalized;
+    DB.saveSettings(settings);
+    offlineBuzzwordRuleDrafts = normalized.map(rule => createOfflineBuzzwordRule(rule));
+    renderOfflineBuzzwordRuleList();
+    alert('去八股规则已保存');
+}
+
+function exportOfflineBuzzwordRules() {
+    const normalized = normalizeOfflineBuzzwordRuleDraftsForSave(offlineBuzzwordRuleDrafts);
+    if (!normalized) return;
+    const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        rules: normalized.map(rule => ({
+            source: rule.source,
+            mode: rule.mode,
+            replacement: rule.replacement || ''
+        }))
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `offline_bagua_rules_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function triggerOfflineBuzzwordImport() {
+    const input = document.getElementById('offline-bagua-import-input');
+    if (!input) return;
+    input.value = '';
+    input.click();
+}
+
+function importOfflineBuzzwordRules(event) {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+        try {
+            const raw = JSON.parse(String(loadEvent.target?.result || '{}'));
+            const importedRules = Array.isArray(raw) ? raw : raw.rules;
+            if (!Array.isArray(importedRules)) throw new Error('JSON 中未找到 rules 数组');
+            const normalized = normalizeOfflineBuzzwordRuleDraftsForSave(importedRules);
+            if (!normalized) return;
+            const settings = DB.getSettings();
+            settings.offlineBuzzwordRules = normalized;
+            DB.saveSettings(settings);
+            offlineBuzzwordRuleDrafts = normalized.map(rule => createOfflineBuzzwordRule(rule));
+            renderOfflineBuzzwordRuleList();
+            alert(`导入成功，已覆盖为 ${normalized.length} 条规则`);
+        } catch (error) {
+            alert(`导入失败：${error.message}`);
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file, 'utf-8');
+}
 function saveOfflineSettings() { 
     const min = parseInt(document.getElementById('offline-min-len').value) || 500; 
     const max = parseInt(document.getElementById('offline-max-len').value) || 700; 
@@ -7028,8 +7252,9 @@ async function triggerAIResponse(options = {}) {
             let offlineStatus = null;
             if (isOfflineActive) {
                 const offlineParsed = parseOfflineReplyPayload(content);
-                content = offlineParsed.body;
-                offlineStatus = offlineParsed.status;
+                const offlineRules = getOfflineBuzzwordRules();
+                content = applyOfflineBuzzwordRulesToText(offlineParsed.body, offlineRules);
+                offlineStatus = applyOfflineBuzzwordRulesToStatus(offlineParsed.status, offlineRules);
                 extractedThought = null;
             }
 

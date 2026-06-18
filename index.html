@@ -752,6 +752,7 @@
                             <span class="chat-thought-toggle">❤</span>
                         </button>
                         <div class="action-btn" onclick="openOfflineSettings()">⚙️</div>
+                        <div class="action-btn offline-bagua-trigger" onclick="openOfflineBuzzwordTool()" aria-label="去八股工具">✏️</div>
                     </div>
                 </div>
                 <div id="offline-status-panel">
@@ -1272,6 +1273,28 @@
                         <input type="color" id="offline-dialog-color" value="#bbbfd3">
                     </div>
                     <button class="save-btn" onclick="saveOfflineSettings()">保存</button>
+                </div>
+            </div>
+
+            <div id="offline-bagua-modal" class="offline-bagua-modal" onclick="closeOfflineBuzzwordTool()">
+                <div class="offline-bagua-modal-content" onclick="event.stopPropagation()">
+                    <div class="offline-bagua-header">
+                        <span class="offline-bagua-close" onclick="closeOfflineBuzzwordTool()">关闭</span>
+                        <span class="offline-bagua-title">✏️ 去八股工具</span>
+                        <div class="offline-bagua-toolbar">
+                            <button type="button" class="offline-bagua-tool-btn" onclick="addOfflineBuzzwordRule()" aria-label="新增规则">+</button>
+                            <button type="button" class="offline-bagua-tool-btn" onclick="removeOfflineBuzzwordRule()" aria-label="删除最新规则">-</button>
+                            <button type="button" class="offline-bagua-tool-btn text" onclick="exportOfflineBuzzwordRules()">导出</button>
+                            <button type="button" class="offline-bagua-tool-btn text" onclick="triggerOfflineBuzzwordImport()">导入</button>
+                        </div>
+                    </div>
+                    <div class="offline-bagua-tip">左侧填写需要处理的词，中间选择“屏蔽”或“替换”，右侧填写替换词。屏蔽模式下右侧留空即可。</div>
+                    <div class="offline-bagua-list" id="offline-bagua-list"></div>
+                    <div class="offline-bagua-empty" id="offline-bagua-empty">当前没有规则，点击右上角 + 新增一行。</div>
+                    <div class="offline-bagua-footer">
+                        <button class="save-btn" onclick="saveOfflineBuzzwordRules()">保存规则</button>
+                    </div>
+                    <input type="file" id="offline-bagua-import-input" accept="application/json,.json" style="display:none" onchange="importOfflineBuzzwordRules(event)">
                 </div>
             </div>
 
