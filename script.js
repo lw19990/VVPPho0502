@@ -3023,8 +3023,18 @@ function renderUserAccounts() {
     accounts.forEach(account => {
         const item = document.createElement('div');
         item.className = 'user-account-list-item';
-        item.textContent = account.name || '我';
         item.onclick = () => openUserAccountEditor(account.id);
+        const name = document.createElement('span');
+        name.className = 'user-account-list-name';
+        name.textContent = account.name || '我';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'user-account-delete-btn';
+        deleteBtn.textContent = '🗑️';
+        deleteBtn.setAttribute('aria-label', '删除账号');
+        deleteBtn.onclick = event => deleteUserAccount(account.id, event);
+        item.appendChild(name);
+        item.appendChild(deleteBtn);
         list.appendChild(item);
     });
     const addItem = document.createElement('div');
@@ -3099,6 +3109,43 @@ function saveUserAccount() {
         r.readAsDataURL(fileInput.files[0]);
     } else {
         processSave(null);
+    }
+}
+
+function deleteUserAccount(accountId, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    if (!confirm('确定要删除这个用户人设账号吗？')) return;
+
+    const accounts = DB.getUserAccounts();
+    const nextAccounts = accounts.filter(account => account.id !== accountId);
+    if (nextAccounts.length === accounts.length) return;
+
+    DB.saveUserAccounts(nextAccounts);
+
+    const forumData = DB.getForumData();
+    let forumChanged = false;
+    if (forumData.accountData && Object.prototype.hasOwnProperty.call(forumData.accountData, accountId)) {
+        delete forumData.accountData[accountId];
+        forumChanged = true;
+    }
+    if (forumData.mainAccountId === accountId) {
+        forumData.mainAccountId = nextAccounts[0]?.id || '';
+        if (forumData.mainAccountId) getForumAccountBucket(forumData, forumData.mainAccountId, true);
+        currentForumAccountId = forumData.mainAccountId || '';
+        forumChanged = true;
+    } else if (currentForumAccountId === accountId) {
+        currentForumAccountId = forumData.mainAccountId || nextAccounts[0]?.id || '';
+    }
+    if (forumChanged) DB.saveForumData(forumData);
+
+    syncContactsWithUserAccounts();
+    renderContactsPanel();
+    if (currentChatContact) {
+        updateChatUserAccountOptions(currentChatContact.userAccountId);
+        renderChatHistory();
     }
 }
 
