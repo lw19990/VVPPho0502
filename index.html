@@ -34,11 +34,32 @@
 
         <!-- 1. 锁屏 -->
         <div id="lock-screen" class="screen active">
-            <div class="clock" id="lock-clock">12:00</div>
-            <div class="date" id="lock-date">1月1日 星期一</div>
-            <div class="slider-container">
-                <div class="slider-text">滑动来解锁</div>
-                <input type="range" min="0" max="100" value="0" id="unlock-slider">
+            <div class="lock-screen-overlay"></div>
+            <div class="lock-screen-content">
+                <div class="clock" id="lock-clock">12:00</div>
+                <div class="date" id="lock-date">1月1日 星期一</div>
+                <div class="lock-passcode-title">输入密码</div>
+                <div class="lock-passcode-dots" id="lock-passcode-dots" aria-label="开屏密码输入状态">
+                    <span class="lock-passcode-dot"></span>
+                    <span class="lock-passcode-dot"></span>
+                    <span class="lock-passcode-dot"></span>
+                    <span class="lock-passcode-dot"></span>
+                </div>
+                <div class="lock-passcode-error" id="lock-passcode-error">密码错误</div>
+                <div class="lock-keypad" aria-label="数字密码键盘">
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('1')">1</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('2')">2</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('3')">3</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('4')">4</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('5')">5</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('6')">6</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('7')">7</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('8')">8</button>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('9')">9</button>
+                    <div class="lock-key lock-key-placeholder" aria-hidden="true"></div>
+                    <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('0')">0</button>
+                    <button type="button" class="lock-key lock-key-delete" onclick="deleteLockPasscodeDigit()">删除</button>
+                </div>
             </div>
         </div>
 
@@ -564,6 +585,20 @@
                 <div class="toggle-switch">
                     <span class="toggle-label">隐藏顶部时间与电量</span>
                     <label class="switch"><input type="checkbox" id="hide-status-info-toggle" onchange="toggleStatusInfoVisibility()"><span class="slider"></span></label>
+                </div>
+
+                <hr class="theme-divider">
+
+                <div class="theme-section-title">开屏密码</div>
+                <div class="toggle-switch">
+                    <span class="toggle-label">关闭开屏密码</span>
+                    <label class="switch"><input type="checkbox" id="disable-lock-passcode-toggle" onchange="toggleLockPasscodeDisabled()"><span class="slider"></span></label>
+                </div>
+                <div class="form-group">
+                    <label>修改开屏密码</label>
+                    <input type="password" id="lock-passcode-input" inputmode="numeric" maxlength="4" placeholder="请输入4位数字密码" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
+                    <div class="theme-note">默认密码为 5168，仅支持 4 位数字。</div>
+                    <button class="save-btn" style="margin-top:12px;" onclick="saveLockPasscode()">保存开屏密码</button>
                 </div>
 
                 <hr class="theme-divider">

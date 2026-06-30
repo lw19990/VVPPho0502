@@ -154,6 +154,10 @@ const BACKGROUND_MESSAGE_CHECK_MS = 30000;
 const backgroundMessageLastRunMap = {};
 const backgroundMessageInFlight = new Set();
 let backgroundMessageTimer = null;
+const DEFAULT_LOCK_PASSCODE = '5168';
+let lockPasscodeInputValue = '';
+let lockPasscodeResetTimer = null;
+let hasResolvedInitialEntryScreen = false;
 const CHAT_CURRENCY_MAP = {
     cny: { code: 'cny', label: '人民币¥', symbol: '¥', cnyPerUnit: 1 },
     twd: { code: 'twd', label: '台币NT$', symbol: 'NT$', cnyPerUnit: 5 },
@@ -178,13 +182,102 @@ function updateTime() {
 setInterval(updateTime, 1000); updateTime();
 
 const screens = document.querySelectorAll('.screen');
-document.getElementById('unlock-slider').addEventListener('input', function() {
-    if (this.value > 90) {
-        document.getElementById('lock-screen').classList.remove('active');
-        document.getElementById('home-screen').classList.add('active');
-        this.value = 0;
-    } else setTimeout(() => { if(this.value < 90) this.value = 0; }, 300);
-});
+function normalizeLockPasscode(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    return /^\d{4}$/.test(digits) ? digits : DEFAULT_LOCK_PASSCODE;
+}
+function getCurrentLockPasscode() {
+    return normalizeLockPasscode(DB.getSettings().lockPasscode);
+}
+function isLockPasscodeDisabled(settings = DB.getSettings()) {
+    return settings.lockPasscodeDisabled === true;
+}
+function setActiveScreen(screenId) {
+    screens.forEach(s => s.classList.remove('active'));
+    const target = document.getElementById(screenId);
+    if (target) target.classList.add('active');
+}
+function resetLockPasscodeEntry(clearError = true) {
+    lockPasscodeInputValue = '';
+    if (lockPasscodeResetTimer) {
+        clearTimeout(lockPasscodeResetTimer);
+        lockPasscodeResetTimer = null;
+    }
+    if (clearError) {
+        const errorEl = document.getElementById('lock-passcode-error');
+        const dotsEl = document.getElementById('lock-passcode-dots');
+        if (errorEl) errorEl.classList.remove('show');
+        if (dotsEl) dotsEl.classList.remove('shake');
+    }
+    updateLockPasscodeDots();
+}
+function updateLockPasscodeDots() {
+    const dots = document.querySelectorAll('#lock-passcode-dots .lock-passcode-dot');
+    dots.forEach((dot, index) => {
+        dot.classList.toggle('filled', index < lockPasscodeInputValue.length);
+    });
+}
+function unlockToHomeScreen() {
+    resetLockPasscodeEntry();
+    setActiveScreen('home-screen');
+}
+function showLockScreen() {
+    resetLockPasscodeEntry();
+    setActiveScreen('lock-screen');
+}
+function resolveInitialEntryScreen() {
+    if (isLockPasscodeDisabled()) unlockToHomeScreen();
+    else showLockScreen();
+}
+function showLockPasscodeError() {
+    const errorEl = document.getElementById('lock-passcode-error');
+    const dotsEl = document.getElementById('lock-passcode-dots');
+    if (errorEl) errorEl.classList.add('show');
+    if (dotsEl) {
+        dotsEl.classList.remove('shake');
+        void dotsEl.offsetWidth;
+        dotsEl.classList.add('shake');
+    }
+    lockPasscodeResetTimer = setTimeout(() => resetLockPasscodeEntry(), 650);
+}
+function validateLockPasscodeEntry() {
+    if (lockPasscodeInputValue !== getCurrentLockPasscode()) {
+        showLockPasscodeError();
+        return;
+    }
+    unlockToHomeScreen();
+}
+function pressLockPasscodeDigit(digit) {
+    if (isLockPasscodeDisabled()) {
+        unlockToHomeScreen();
+        return;
+    }
+    if (!/^\d$/.test(String(digit)) || lockPasscodeInputValue.length >= 4) return;
+    const errorEl = document.getElementById('lock-passcode-error');
+    const dotsEl = document.getElementById('lock-passcode-dots');
+    if (errorEl) errorEl.classList.remove('show');
+    if (dotsEl) dotsEl.classList.remove('shake');
+    lockPasscodeInputValue += String(digit);
+    updateLockPasscodeDots();
+    if (lockPasscodeInputValue.length === 4) {
+        setTimeout(validateLockPasscodeEntry, 120);
+    }
+}
+function deleteLockPasscodeDigit() {
+    if (lockPasscodeInputValue.length === 0) return;
+    lockPasscodeInputValue = lockPasscodeInputValue.slice(0, -1);
+    updateLockPasscodeDots();
+}
+function handleLockPasscodeKeyboard(event) {
+    const lockScreen = document.getElementById('lock-screen');
+    if (!lockScreen || !lockScreen.classList.contains('active') || isLockPasscodeDisabled()) return;
+    if (/^\d$/.test(event.key)) {
+        pressLockPasscodeDigit(event.key);
+    } else if (event.key === 'Backspace' || event.key === 'Delete') {
+        deleteLockPasscodeDigit();
+    }
+}
+document.addEventListener('keydown', handleLockPasscodeKeyboard);
 
 // Temperature Slider Synchronization
 const tempSlider = document.getElementById('temperature-slider');
@@ -1165,7 +1258,9 @@ const DB = {
             temperature: 0.7,
             keepAliveEnabled: false,
             notificationPermissionGranted: false,
-            offlineBuzzwordRules: getDefaultOfflineBuzzwordRules()
+            offlineBuzzwordRules: getDefaultOfflineBuzzwordRules(),
+            lockPasscode: DEFAULT_LOCK_PASSCODE,
+            lockPasscodeDisabled: false
         };
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
@@ -1177,6 +1272,8 @@ const DB = {
         if (saved.notificationPermissionGranted === undefined) saved.notificationPermissionGranted = false;
         if (saved.offlineBuzzwordRules === undefined) saved.offlineBuzzwordRules = getDefaultOfflineBuzzwordRules();
         else saved.offlineBuzzwordRules = normalizeOfflineBuzzwordRules(saved.offlineBuzzwordRules);
+        saved.lockPasscode = normalizeLockPasscode(saved.lockPasscode);
+        if (saved.lockPasscodeDisabled === undefined) saved.lockPasscodeDisabled = false;
         return saved;
     },
     saveSettings: (data) => {
@@ -1914,6 +2011,10 @@ function loadSettings() {
     document.getElementById('hide-notch-toggle').checked = s.hideNotch === true;
     document.getElementById('hide-status-info-toggle').checked = s.hideStatusInfo === true;
     document.getElementById('keep-alive-toggle').checked = s.keepAliveEnabled === true;
+    const disableLockToggle = document.getElementById('disable-lock-passcode-toggle');
+    const lockPasscodeInput = document.getElementById('lock-passcode-input');
+    if (disableLockToggle) disableLockToggle.checked = s.lockPasscodeDisabled === true;
+    if (lockPasscodeInput) lockPasscodeInput.value = s.lockPasscode || DEFAULT_LOCK_PASSCODE;
     const temp = s.temperature || 0.7;
     document.getElementById('temperature-slider').value = Math.round(temp * 100);
     document.getElementById('temperature-input').value = temp;
@@ -1925,12 +2026,17 @@ function loadSettings() {
     syncBackgroundRuntimeByVisibility();
     applyTheme();
     applyPage2Images();
+    if (!hasResolvedInitialEntryScreen) {
+        resolveInitialEntryScreen();
+        hasResolvedInitialEntryScreen = true;
+    }
 }
 
 function saveSettings() {
     const temperature = parseFloat(document.getElementById('temperature-input').value) || 0.7;
     const current = DB.getSettings();
     DB.saveSettings({
+        ...current,
         url: document.getElementById('api-url').value,
         key: document.getElementById('api-key').value,
         model: document.getElementById('model-name').value,
@@ -1940,7 +2046,9 @@ function saveSettings() {
         hideStatusInfo: document.getElementById('hide-status-info-toggle').checked,
         temperature: temperature,
         keepAliveEnabled: document.getElementById('keep-alive-toggle').checked,
-        notificationPermissionGranted: current.notificationPermissionGranted === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted')
+        notificationPermissionGranted: current.notificationPermissionGranted === true || (typeof Notification !== 'undefined' && Notification.permission === 'granted'),
+        lockPasscode: normalizeLockPasscode(current.lockPasscode),
+        lockPasscodeDisabled: current.lockPasscodeDisabled === true
     });
     updateNotificationPermissionStatusUI();
     applyKeepAliveAudioState();
@@ -2356,9 +2464,34 @@ function startWidgetSlideshowIfNeeded() {
         setWidgetSlideByIndex(widgetSlideIndex + 1, true);
     }, 5000);
 }
-function renderThemeSettings() { const theme = DB.getTheme(); currentThemeType = theme.wallpaperType; switchThemeType(currentThemeType); if (theme.wallpaperType === 'color') document.getElementById('theme-wallpaper-color').value = theme.wallpaperValue; document.getElementById('theme-case-color').value = theme.caseColor; document.getElementById('theme-font-url').value = theme.customFontUrl || ''; document.getElementById('theme-font-color').value = theme.fontColor || '#000000'; }
+function renderThemeSettings() { const theme = DB.getTheme(); const settings = DB.getSettings(); currentThemeType = theme.wallpaperType; switchThemeType(currentThemeType); if (theme.wallpaperType === 'color') document.getElementById('theme-wallpaper-color').value = theme.wallpaperValue; document.getElementById('theme-case-color').value = theme.caseColor; document.getElementById('theme-font-url').value = theme.customFontUrl || ''; document.getElementById('theme-font-color').value = theme.fontColor || '#000000'; document.getElementById('disable-lock-passcode-toggle').checked = settings.lockPasscodeDisabled === true; document.getElementById('lock-passcode-input').value = settings.lockPasscode || DEFAULT_LOCK_PASSCODE; }
 function switchThemeType(type) { currentThemeType = type; document.getElementById('theme-type-color').classList.toggle('active', type === 'color'); document.getElementById('theme-type-image').classList.toggle('active', type === 'image'); document.getElementById('theme-input-color').style.display = type === 'color' ? 'block' : 'none'; document.getElementById('theme-input-image').style.display = type === 'image' ? 'block' : 'none'; }
 function saveTheme() { const caseColor = document.getElementById('theme-case-color').value; const currentTheme = DB.getTheme(); const processSave = (val) => { currentTheme.wallpaperType = currentThemeType; currentTheme.wallpaperValue = val; currentTheme.caseColor = caseColor; DB.saveTheme(currentTheme); applyTheme(); alert('主题已应用'); }; if (currentThemeType === 'color') { processSave(document.getElementById('theme-wallpaper-color').value); } else { const urlInput = document.getElementById('theme-wallpaper-url').value; const fileInput = document.getElementById('theme-wallpaper-image'); if (urlInput) processSave(urlInput); else if (fileInput.files && fileInput.files[0]) { const r = new FileReader(); r.onload = (e) => processSave(e.target.result); r.readAsDataURL(fileInput.files[0]); } else { if (currentTheme.wallpaperType === 'image') processSave(currentTheme.wallpaperValue); else alert('请选择图片'); } } }
+function toggleLockPasscodeDisabled() {
+    const settings = DB.getSettings();
+    settings.lockPasscodeDisabled = document.getElementById('disable-lock-passcode-toggle').checked === true;
+    DB.saveSettings(settings);
+    if (settings.lockPasscodeDisabled) {
+        alert('已关闭开屏密码，重新进入网页时将直接进入主页');
+    } else {
+        alert('已开启开屏密码，重新进入网页时需要输入密码');
+    }
+}
+function saveLockPasscode() {
+    const input = document.getElementById('lock-passcode-input');
+    const passcode = String(input?.value || '').replace(/\D/g, '');
+    if (!/^\d{4}$/.test(passcode)) {
+        alert('开屏密码必须是4位数字');
+        if (input) input.focus();
+        return;
+    }
+    const settings = DB.getSettings();
+    settings.lockPasscode = passcode;
+    DB.saveSettings(settings);
+    if (input) input.value = passcode;
+    resetLockPasscodeEntry();
+    alert('开屏密码已更新');
+}
 function captureDesktopIconDefaults() {
     getDesktopIconIds().forEach((id) => {
         const el = document.getElementById(id);
