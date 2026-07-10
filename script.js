@@ -6627,6 +6627,29 @@ function setOfflineModeBackground(bgUrl) {
     if (offlineRainRenderer) offlineRainRenderer.setImage(bgUrl || '');
 }
 
+function getOfflinePerspectiveInstruction(perspective, contactName, userName) {
+    const safeContactName = String(contactName || '角色').trim() || '角色';
+    const rawUserName = String(userName || '').trim();
+    const safeThirdUserName = rawUserName && rawUserName !== '我' ? rawUserName : '用户';
+
+    switch (perspective) {
+        case 'first_char':
+            return `【正文人称锁定】\n- 正文必须严格站在${safeContactName}本人视角书写。\n- “我”只允许指代${safeContactName}，绝对不能指代用户。\n- “你”只允许指代用户。\n- 正文里所有动作、神态、心理、感受，若用“我”开头，主体都必须是${safeContactName}。`;
+        case 'second':
+            return `【正文人称锁定】\n- 正文必须严格用“你”指代用户，不能把用户写成“我”或“${safeThirdUserName}”。\n- 若正文里出现“我”，其主体只能是${safeContactName}。\n- 绝对禁止把“你”误写成${safeContactName}自己。`;
+        case 'third':
+            return `【正文人称锁定】\n- 正文必须严格用“${safeThirdUserName}”指代用户，不能把用户写成“我”或“你”。\n- 若正文里出现“我”，其主体只能是${safeContactName}。\n- 若正文里出现“你”，也只能用于角色对用户的直接对话，不能作为叙事主视角。`;
+        case 'first_user':
+        default:
+            return `【正文人称锁定】\n- 正文必须严格站在用户本人视角书写。\n- 正文中的“我”只允许指代用户，绝对不能指代${safeContactName}。\n- 正文中的“你”默认指代${safeContactName}。\n- 若要描写${safeContactName}的动作、神态、心理、感受，只能写成“你…… / ${safeContactName}…… / 他(她/TA)……”这类形式，绝对禁止把${safeContactName}写成“我”。\n- 输出前自检：正文里每一个“我”都必须是用户本人。`;
+    }
+}
+
+function getOfflineStatusBarInstruction(contactName) {
+    const safeContactName = String(contactName || '角色').trim() || '角色';
+    return `【状态栏主体锁定】\n- 状态栏四项只允许描述${safeContactName}当前的状态，不受正文人称设置影响。\n- 【心情】只写${safeContactName}的情绪；【服装状态】只写${safeContactName}的衣着；【动作】只写${safeContactName}的动作；【心声独白】只写${safeContactName}此刻的内心活动。\n- 绝对禁止在状态栏中描写用户的情绪、衣着、动作、内心、身体反应或对用户状态的判断。\n- 状态栏不要把用户写成主体；拿不准时，宁可重复描述${safeContactName}，也不要描述用户。\n- 状态栏中禁止用“我”或“你”制造主体歧义，默认主体始终是${safeContactName}。`;
+}
+
 function extractOfflineStatusBlock(rawContent) {
     const text = String(rawContent || '');
     const map = {
@@ -7359,7 +7382,9 @@ async function triggerAIResponse(options = {}) {
         systemContent += `\n\n===== 【语音通话模式】 =====\n现在你正在和用户进行语音通话。\n**重要规则**：\n1. 请像打电话一样回复，保持口语化。\n2. **严禁**使用 '|||' 分隔消息。\n3. 一次只回复一段话，字数限制在150字以内。\n4. 必须在回复前生成心声。\n格式：[THOUGHTS: 心声] ||| 回复内容`;
     } else if (isOfflineActive) {
         const offSet = currentChatContact.offlineSettings || { min: 500, max: 700, style: '' };
-        systemContent += `\n\n===== 【线下见面模式】 =====\n现在你和用户正在线下见面，面对面交流。\n**重要规则**：\n1. 你必须同时输出“正文回复 + 状态栏”。\n2. **严禁**使用 '|||' 分隔消息。\n3. 请严格按下面结构输出（顺序不可变）：\n【正文】\n（这里写面对面互动的正文回复，允许叙事与对话）\n【状态栏】\n【心情】（简短描述角色此时的心情）\n【服装状态】（简短描述角色现在的衣着）\n【动作】（简短描述角色此时的动作）\n【心声独白】（100字以内）\n4. **字数硬性要求（只统计【正文】部分，不统计状态栏）**：正文必须在 ${offSet.min} 到 ${offSet.max} 字之间。\n5. 如果正文字数不在上述范围内，你必须先在内部重写，直到满足字数后再输出最终答案。\n6. 正文必须是线下场景的长文描写，包含动作、神态、环境细节与情绪推进，禁止退化成线上聊天式短句。\n7. 除“心声独白”外，其他三项保持简短（建议 10-30 字）。\n8. 正文文风要求：${offSet.style || '细腻、沉浸感强'}。\n9. 不得输出线上模式的 [THOUGHTS] 格式。`;
+        const perspectiveInstruction = getOfflinePerspectiveInstruction(offSet.perspective, currentChatContact.name, userSettings.userName);
+        const statusBarInstruction = getOfflineStatusBarInstruction(currentChatContact.name);
+        systemContent += `\n\n===== 【线下见面模式】 =====\n现在你和用户正在线下见面，面对面交流。\n**重要规则**：\n1. 你必须同时输出“正文回复 + 状态栏”。\n2. **严禁**使用 '|||' 分隔消息。\n3. 请严格按下面结构输出（顺序不可变）：\n【正文】\n（这里写面对面互动的正文回复，允许叙事与对话）\n【状态栏】\n【心情】（简短描述角色此时的心情）\n【服装状态】（简短描述角色现在的衣着）\n【动作】（简短描述角色此时的动作）\n【心声独白】（100字以内）\n4. **字数硬性要求（只统计【正文】部分，不统计状态栏）**：正文必须在 ${offSet.min} 到 ${offSet.max} 字之间。\n5. 如果正文字数不在上述范围内，你必须先在内部重写，直到满足字数后再输出最终答案。\n6. 正文必须是线下场景的长文描写，包含动作、神态、环境细节与情绪推进，禁止退化成线上聊天式短句。\n7. 除“心声独白”外，其他三项保持简短（建议 10-30 字）。\n8. 正文文风要求：${offSet.style || '细腻、沉浸感强'}。\n9. 正文必须遵守以下人称约束：\n${perspectiveInstruction}\n10. 状态栏必须遵守以下主体约束：\n${statusBarInstruction}\n11. 如果正文人称设置与状态栏主体发生冲突，始终以“正文遵守人称设置、状态栏只描述${currentChatContact.name}状态”为最高优先级。\n12. 不得输出线上模式的 [THOUGHTS] 格式。`;
     } else {
         if (isLongChainThoughtMode) {
             systemContent += `\n\n===== 【强制回复格式 - 仿思考链长心声模式】 =====\n你必须在每次回复的**最开始**生成一段“仿思考链长心声”，且仅输出一段。心声必须包裹在 [THOUGHTS: ...] 中，然后使用 ||| 分隔，再输出你对用户的实际回复。\n\n【长心声硬性要求】\n1. 心声字数必须在 100 到 300 字之间。\n2. 心声只写“你收到用户这条消息后的第一反应和真实情绪波动”，必须像真人脑内自言自语。\n3. 严禁 AI 式分析、严禁策略化表达、严禁计划如何回复。不要出现“我应该怎么回/先说什么再说什么/这样回复更好/为了显得xxx”等元话术。\n4. 严禁把心声写成条目、提纲、总结、教程、复盘或任务分解。\n5. 允许情绪外露、犹豫、自我打断、短暂跑题，但核心必须是“当下反应”，不是“回复规划”。\n6. 必须正确使用中文标点符号（，。！？：；、“”），禁止整段无标点或标点混乱。\n7. 心声必须换行排版，至少分成 2-4 个短段落；每段建议 1-2 句，避免一整坨长段。\n8. 心声与正文语气可以不同，但都必须符合角色设定。\n9. 如果正文拆成多条（用 ||| 分隔），仅第一条消息开头允许出现一次时间前缀，格式固定为 [发送于：YYYY/M/D HH:MM:SS]，后续消息严禁重复该前缀。\n\n格式示例：\n[THOUGHTS: 第一小段（真实反应）。\n第二小段（情绪波动）。\n第三小段（拉回当下）。] ||| [发送于：2026/6/1 18:00:00] 你的第一条消息 ||| 你的第二条消息`;
