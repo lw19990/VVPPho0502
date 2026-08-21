@@ -56,7 +56,7 @@
                     <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('7')">7</button>
                     <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('8')">8</button>
                     <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('9')">9</button>
-                    <div class="lock-key lock-key-placeholder" aria-hidden="true"></div>
+                    <button type="button" id="lock-forgot-password" class="lock-key lock-key-forgot is-unavailable" onclick="forgotLockPasscode()" disabled aria-hidden="true">忘记密码</button>
                     <button type="button" class="lock-key" onclick="pressLockPasscodeDigit('0')">0</button>
                     <button type="button" class="lock-key lock-key-delete" onclick="deleteLockPasscodeDigit()">删除</button>
                 </div>

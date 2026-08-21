@@ -192,6 +192,17 @@ function getCurrentLockPasscode() {
 function isLockPasscodeDisabled(settings = DB.getSettings()) {
     return settings.lockPasscodeDisabled === true;
 }
+function hasCustomLockPasscode(settings = DB.getSettings()) {
+    return settings.lockPasscodeCustomized === true;
+}
+function updateLockForgotPasswordVisibility() {
+    const button = document.getElementById('lock-forgot-password');
+    if (!button) return;
+    const isAvailable = hasCustomLockPasscode();
+    button.classList.toggle('is-unavailable', !isAvailable);
+    button.disabled = !isAvailable;
+    button.setAttribute('aria-hidden', String(!isAvailable));
+}
 function setActiveScreen(screenId) {
     screens.forEach(s => s.classList.remove('active'));
     const target = document.getElementById(screenId);
@@ -223,11 +234,16 @@ function unlockToHomeScreen() {
 }
 function showLockScreen() {
     resetLockPasscodeEntry();
+    updateLockForgotPasswordVisibility();
     setActiveScreen('lock-screen');
 }
 function resolveInitialEntryScreen() {
     if (isLockPasscodeDisabled()) unlockToHomeScreen();
     else showLockScreen();
+}
+function forgotLockPasscode() {
+    if (!hasCustomLockPasscode()) return;
+    unlockToHomeScreen();
 }
 function showLockPasscodeError() {
     const errorEl = document.getElementById('lock-passcode-error');
@@ -1260,7 +1276,8 @@ const DB = {
             notificationPermissionGranted: false,
             offlineBuzzwordRules: getDefaultOfflineBuzzwordRules(),
             lockPasscode: DEFAULT_LOCK_PASSCODE,
-            lockPasscodeDisabled: false
+            lockPasscodeDisabled: false,
+            lockPasscodeCustomized: false
         };
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
@@ -1274,6 +1291,10 @@ const DB = {
         else saved.offlineBuzzwordRules = normalizeOfflineBuzzwordRules(saved.offlineBuzzwordRules);
         saved.lockPasscode = normalizeLockPasscode(saved.lockPasscode);
         if (saved.lockPasscodeDisabled === undefined) saved.lockPasscodeDisabled = false;
+        if (saved.lockPasscodeCustomized === undefined) {
+            // 兼容旧版本：非默认密码说明用户已经自定义过密码。
+            saved.lockPasscodeCustomized = saved.lockPasscode !== DEFAULT_LOCK_PASSCODE;
+        }
         return saved;
     },
     saveSettings: (data) => {
@@ -2026,6 +2047,7 @@ function loadSettings() {
     syncBackgroundRuntimeByVisibility();
     applyTheme();
     applyPage2Images();
+    updateLockForgotPasswordVisibility();
     if (!hasResolvedInitialEntryScreen) {
         resolveInitialEntryScreen();
         hasResolvedInitialEntryScreen = true;
@@ -2227,7 +2249,76 @@ async function fetchModels(btn) {
     }
 }
 function selectModel(sel) { if (sel.value) document.getElementById('model-name').value = sel.value; }
-function exportBackup() { const backupData = { settings: DB.getSettings(), contacts: DB.getContacts(), chats: DB.getChats(), worldbook: DB.getWorldBook(), spyData: DB.getSpyData(), theme: DB.getTheme(), memories: DB.getMemories(), calendar: DB.getCalendarEvents(), coupleData: DB.getCoupleData(), stickers: DB.getStickers(), questionBoxData: DB.getQuestionBox(), musicData: DB.getMusicList(), forumData: DB.getForumData(), tomatoData: DB.getTomatoData(), gameData: DB.getGameData(), userAccounts: DB.getUserAccounts(), walletData: DB.getWalletData(), timestamp: Date.now() }; const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData)); const a = document.createElement('a'); a.href = dataStr; a.download = "iphone_sim_backup_" + new Date().toISOString().slice(0,10) + ".json"; document.body.appendChild(a); a.click(); a.remove(); }
+function isIOSDevice() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+async function exportBackup() {
+    try {
+        const backupData = {
+            settings: DB.getSettings(),
+            contacts: DB.getContacts(),
+            chats: DB.getChats(),
+            worldbook: DB.getWorldBook(),
+            spyData: DB.getSpyData(),
+            theme: DB.getTheme(),
+            memories: DB.getMemories(),
+            calendar: DB.getCalendarEvents(),
+            coupleData: DB.getCoupleData(),
+            stickers: DB.getStickers(),
+            questionBoxData: DB.getQuestionBox(),
+            musicData: DB.getMusicList(),
+            forumData: DB.getForumData(),
+            tomatoData: DB.getTomatoData(),
+            gameData: DB.getGameData(),
+            userAccounts: DB.getUserAccounts(),
+            walletData: DB.getWalletData(),
+            timestamp: Date.now()
+        };
+        const fileName = `iphone_sim_backup_${new Date().toISOString().slice(0, 10)}.json`;
+        const json = JSON.stringify(backupData);
+        const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+        const isIOS = isIOSDevice();
+
+        // iOS Safari 不可靠地支持 <a download>，优先交给系统共享面板保存到“文件”。
+        if (isIOS && typeof File === 'function' && typeof navigator.share === 'function' && typeof navigator.canShare === 'function') {
+            const jsonFile = new File([blob], fileName, { type: 'application/json' });
+            const textFile = new File([json], fileName, { type: 'text/plain' });
+            const file = [jsonFile, textFile].find(candidate => navigator.canShare({ files: [candidate] }));
+            if (file) {
+                try {
+                    await navigator.share({ files: [file], title: 'VVPhone 数据备份' });
+                    return;
+                } catch (error) {
+                    if (error?.name === 'AbortError') return;
+                    console.warn('iOS 系统分享备份失败，尝试浏览器备用方式', error);
+                }
+            }
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.rel = 'noopener';
+        if (isIOS) {
+            // 兼容不支持文件分享的旧版 iOS：打开后可从 Safari 分享菜单存储到“文件”。
+            a.target = '_blank';
+        } else {
+            a.download = fileName;
+        }
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+        if (isIOS) {
+            alert('备份已在新页面打开，请点击 Safari 的“共享”按钮并选择“存储到文件”。');
+        }
+    } catch (error) {
+        console.error('导出备份失败', error);
+        alert(`导出备份失败：${error?.message || '未知错误'}`);
+    }
+}
 function importBackupDataToDB(data) {
     if (data.settings) DB.saveSettings(data.settings);
     if (data.contacts) DB.saveContacts(data.contacts);
@@ -2417,7 +2508,6 @@ var widgetSlideTimer = null;
 var widgetSlideImages = [];
 var widgetSlideIndex = 0;
 var widgetModalDraftImages = Array(5).fill('');
-loadSettings();
 let currentThemeType = 'color';
 function getDesktopIconIds() {
     return [
@@ -2487,9 +2577,11 @@ function saveLockPasscode() {
     }
     const settings = DB.getSettings();
     settings.lockPasscode = passcode;
+    settings.lockPasscodeCustomized = true;
     DB.saveSettings(settings);
     if (input) input.value = passcode;
     resetLockPasscodeEntry();
+    updateLockForgotPasswordVisibility();
     alert('开屏密码已更新');
 }
 function captureDesktopIconDefaults() {
