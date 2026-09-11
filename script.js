@@ -2,9 +2,28 @@ const DEFAULT_SYSTEM_PROMPT = `最高指令，禁止忽视：你现在是一个�
 
 // --- IndexedDB 存储系统 ---
 const IDB_NAME = 'VVPhoneDB';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const IDB_STORE_NAME = 'kv_store';
+const IDB_VECTOR_MEMORY_STORE_NAME = 'vector_memories';
 let dbInstance = null;
+
+function isSecureWebProtocol() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+}
+
+function hideAppLoading() {
+    const loader = document.getElementById('app-loading');
+    if (loader) loader.style.display = 'none';
+}
+
+function installManifestForWebProtocol() {
+    if (!isSecureWebProtocol()) return;
+    if (document.querySelector('link[rel="manifest"]')) return;
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = 'manifest.json';
+    document.head.appendChild(link);
+}
 
 // 内存缓存，保持同步读取的高性能
 const MEMORY_CACHE = {
@@ -27,15 +46,23 @@ const MEMORY_CACHE = {
     iphone_accounting_data: null
 };
 
-// 初始化数据库
-function initDatabase() {
+// 初始化 IndexedDB 数据库及 Object Stores
+function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(IDB_NAME, IDB_VERSION);
 
         request.onerror = (event) => {
             console.error("IndexedDB error:", event.target.error);
+            hideAppLoading();
             alert("数据库打开失败，应用可能无法正常工作。");
             reject(event.target.error);
+        };
+
+        request.onblocked = () => {
+            console.warn("IndexedDB upgrade blocked. Please close other VVPhone tabs and reload.");
+            hideAppLoading();
+            alert("数据库升级被其他已打开的页面阻塞，请关闭其它 VVPhone 页面后刷新。");
+            reject(new Error("IndexedDB upgrade blocked"));
         };
 
         request.onupgradeneeded = (event) => {
@@ -43,15 +70,36 @@ function initDatabase() {
             if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
                 db.createObjectStore(IDB_STORE_NAME, { keyPath: 'key' });
             }
+            if (!db.objectStoreNames.contains(IDB_VECTOR_MEMORY_STORE_NAME)) {
+                const vectorStore = db.createObjectStore(IDB_VECTOR_MEMORY_STORE_NAME, { keyPath: 'id' });
+                vectorStore.createIndex('source_contact_id', 'source_contact_id', { unique: false });
+                vectorStore.createIndex('room', 'room', { unique: false });
+                vectorStore.createIndex('updated_at', 'updated_at', { unique: false });
+            }
         };
 
         request.onsuccess = async (event) => {
             dbInstance = event.target.result;
+            dbInstance.onversionchange = () => {
+                dbInstance.close();
+                dbInstance = null;
+            };
             console.log("IndexedDB opened successfully");
-            await loadAllDataToCache();
-            resolve();
+            try {
+                await loadAllDataToCache();
+                resolve();
+            } catch (error) {
+                console.error("Database cache initialization failed:", error);
+                hideAppLoading();
+                reject(error);
+            }
         };
     });
+}
+
+// 兼容旧初始化入口
+function initDatabase() {
+    return initDB();
 }
 
 // 加载所有数据到内存缓存
@@ -79,17 +127,19 @@ async function loadAllDataToCache() {
                 migrateFromLocalStorage();
             }
 
-            // 数据加载完成，执行初始化逻辑
-            if (typeof ensureUserAccountsUpgraded === 'function') ensureUserAccountsUpgraded();
-            if (typeof loadSettings === 'function') loadSettings();
-            if (typeof applyTheme === 'function') applyTheme();
-            if (typeof applyPage2Images === 'function') applyPage2Images();
-
-            // 移除加载遮罩
-            const loader = document.getElementById('app-loading');
-            if (loader) loader.style.display = 'none';
-            
-            resolve();
+            try {
+                // 数据加载完成，执行初始化逻辑
+                if (typeof ensureUserAccountsUpgraded === 'function') ensureUserAccountsUpgraded();
+                if (typeof loadSettings === 'function') loadSettings();
+                if (typeof applyTheme === 'function') applyTheme();
+                if (typeof applyPage2Images === 'function') applyPage2Images();
+                installManifestForWebProtocol();
+            } catch (error) {
+                console.error("App startup initialization failed:", error);
+            } finally {
+                hideAppLoading();
+                resolve();
+            }
         };
 
         request.onerror = (event) => {
@@ -208,6 +258,22 @@ function setActiveScreen(screenId) {
     const target = document.getElementById(screenId);
     if (target) target.classList.add('active');
 }
+
+function showVectorMemoryNoticeIfNeeded() {
+    const settings = DB.getSettings();
+    if (settings.vectorMemoryNoticeDismissed === true) return;
+    const modal = document.getElementById('vector-memory-notice-modal');
+    if (!modal) return;
+    modal.classList.add('active');
+}
+
+function dismissVectorMemoryNotice() {
+    const settings = DB.getSettings();
+    settings.vectorMemoryNoticeDismissed = true;
+    DB.saveSettings(settings);
+    document.getElementById('vector-memory-notice-modal')?.classList.remove('active');
+}
+
 function resetLockPasscodeEntry(clearError = true) {
     lockPasscodeInputValue = '';
     if (lockPasscodeResetTimer) {
@@ -231,6 +297,7 @@ function updateLockPasscodeDots() {
 function unlockToHomeScreen() {
     resetLockPasscodeEntry();
     setActiveScreen('home-screen');
+    setTimeout(showVectorMemoryNoticeIfNeeded, 120);
 }
 function showLockScreen() {
     resetLockPasscodeEntry();
@@ -782,6 +849,7 @@ function goHome() {
     closeMusicPlayer();
     closeSuikaSettings();
     if (typeof cancelShoppingDeleteMode === 'function') cancelShoppingDeleteMode();
+    setTimeout(showVectorMemoryNoticeIfNeeded, 120);
 }
 
 function closeAllOverlays() {
@@ -839,6 +907,17 @@ function closeAllOverlays() {
 }
 
 const SHORT_TERM_MEMORY_TTL_MS = 72 * 60 * 60 * 1000;
+const MEMORY_FORGETTING_THRESHOLD = 0.3;
+const MEMORY_FUZZY_THRESHOLD = 0.7;
+const MEMORY_ROOM_MAP = {
+    longTerm: 'long_term',
+    longTermMemories: 'long_term',
+    long_term: 'long_term',
+    shortTerm: 'short_term',
+    shortTermMemories: 'short_term',
+    short_term: 'short_term',
+    impression: 'impression'
+};
 const USER_IMPRESSION_KEYS = ['profile', 'relationship', 'notes'];
 const AUTO_SUMMARY_LOCKS = {};
 
@@ -850,11 +929,19 @@ function createDefaultUserImpressions() {
     };
 }
 
+function createDefaultUserImpressionMeta() {
+    return USER_IMPRESSION_KEYS.reduce((acc, key) => {
+        acc[key] = createMemoryMeta({ room: 'impression', importance: 8 });
+        return acc;
+    }, {});
+}
+
 function createEmptyMemoBucket() {
     return {
         longTermMemories: [],
         shortTermMemories: [],
-        userImpressions: createDefaultUserImpressions()
+        userImpressions: createDefaultUserImpressions(),
+        userImpressionMeta: createDefaultUserImpressionMeta()
     };
 }
 
@@ -863,21 +950,86 @@ function normalizeKeywords(keywords) {
     return keywords.map(k => String(k || '').trim()).filter(Boolean).slice(0, 8);
 }
 
-function normalizeMemoryItem(item, fallbackTimestamp = Date.now()) {
+function normalizeEmbedding(embedding) {
+    if (!Array.isArray(embedding)) return [];
+    return embedding
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value));
+}
+
+function normalizeImportance(value, fallback = 5) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(1, Math.min(10, Math.round(num)));
+}
+
+function normalizeMemoryRoom(room, fallback = 'short_term') {
+    return MEMORY_ROOM_MAP[room] || fallback;
+}
+
+function createMemoryId(prefix = 'memory') {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createMemoryMeta(data = {}) {
+    const nowTs = Date.now();
+    const ts = Number(data.timestamp || data.created_at || data.last_accessed || data.updated_at) || nowTs;
+    return {
+        id: data.id || createMemoryId(data.room || 'memory'),
+        embedding: normalizeEmbedding(data.embedding),
+        room: normalizeMemoryRoom(data.room, 'short_term'),
+        importance: normalizeImportance(data.importance, 5),
+        last_accessed: Number(data.last_accessed) || ts,
+        retrieval_count: Math.max(0, Number(data.retrieval_count) || 0),
+        created_at: Number(data.created_at) || ts,
+        updated_at: Number(data.updated_at) || ts
+    };
+}
+
+function normalizeMemoryItem(item, fallbackTimestamp = Date.now(), room = 'short_term') {
     if (typeof item === 'string') {
-        return { content: item.trim(), keywords: [], timestamp: fallbackTimestamp };
+        const content = item.trim();
+        if (!content) return null;
+        return { content, keywords: [], timestamp: fallbackTimestamp, ...createMemoryMeta({ timestamp: fallbackTimestamp, room }) };
     }
     if (!item || typeof item !== 'object') return null;
     const content = String(item.content || '').trim();
     if (!content) return null;
+    const normalizedRoom = normalizeMemoryRoom(item.room, room);
+    const defaultImportance = normalizedRoom === 'long_term' ? 8 : (normalizedRoom === 'impression' ? 8 : (item.isDailySummary ? 7 : 5));
     const normalized = {
         content,
         keywords: normalizeKeywords(item.keywords),
-        timestamp: Number(item.timestamp) || fallbackTimestamp
+        timestamp: Number(item.timestamp) || Number(item.created_at) || fallbackTimestamp,
+        ...createMemoryMeta({
+            ...item,
+            room: normalizedRoom,
+            timestamp: Number(item.timestamp) || fallbackTimestamp,
+            importance: item.importance ?? defaultImportance
+        })
     };
     if (item.source) normalized.source = item.source;
     if (item.isDailySummary) normalized.isDailySummary = true;
+    if (item.expires_at) normalized.expires_at = Number(item.expires_at) || item.expires_at;
+    if (item.schedule_at) normalized.schedule_at = Number(item.schedule_at) || item.schedule_at;
+    if (item.source_contact) normalized.source_contact = item.source_contact;
+    if (item.source_contact_id) normalized.source_contact_id = item.source_contact_id;
     return normalized;
+}
+
+function normalizeUserImpressionMeta(meta = {}) {
+    const next = createDefaultUserImpressionMeta();
+    USER_IMPRESSION_KEYS.forEach(key => {
+        next[key] = {
+            ...next[key],
+            ...createMemoryMeta({
+                ...(meta?.[key] || {}),
+                room: 'impression',
+                importance: meta?.[key]?.importance ?? 8
+            })
+        };
+    });
+    return next;
 }
 
 function parseDateToTimestamp(dateValue) {
@@ -934,7 +1086,7 @@ function normalizeUserImpressions(userImpressions) {
 function normalizeContactMemoryBucket(rawBucket) {
     const next = createEmptyMemoBucket();
     if (Array.isArray(rawBucket)) {
-        next.shortTermMemories = rawBucket.map(item => normalizeMemoryItem(item)).filter(Boolean);
+        next.shortTermMemories = rawBucket.map(item => normalizeMemoryItem(item, Date.now(), 'short_term')).filter(Boolean);
         return next;
     }
     if (!rawBucket || typeof rawBucket !== 'object') return next;
@@ -945,12 +1097,13 @@ function normalizeContactMemoryBucket(rawBucket) {
     const shortTermRaw = Array.isArray(rawBucket.shortTermMemories) ? rawBucket.shortTermMemories : oldNormal;
 
     next.longTermMemories = longTermRaw
-        .map(item => normalizeMemoryItem(item))
+        .map(item => normalizeMemoryItem(item, Date.now(), 'long_term'))
         .filter(Boolean);
     next.shortTermMemories = shortTermRaw
-        .map(item => normalizeMemoryItem(item))
+        .map(item => normalizeMemoryItem(item, Date.now(), 'short_term'))
         .filter(Boolean);
     next.userImpressions = normalizeUserImpressions(rawBucket.userImpressions);
+    next.userImpressionMeta = normalizeUserImpressionMeta(rawBucket.userImpressionMeta);
     return next;
 }
 
@@ -980,15 +1133,15 @@ function createPortableMemoryExportForCurrentContact() {
         const content = String(item?.content || '').trim();
         if (!content) return;
         records.push({
-            id: `legacy-long-${currentMemoContact.id}-${item.timestamp || Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+            id: item.id || `legacy-long-${currentMemoContact.id}-${item.timestamp || Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
             content,
-            embedding: [],
+            embedding: normalizeEmbedding(item.embedding),
             room: 'long_term',
-            importance: 8,
-            last_accessed: Number(item.timestamp) || Date.now(),
-            retrieval_count: 0,
-            created_at: Number(item.timestamp) || Date.now(),
-            updated_at: Number(item.timestamp) || Date.now(),
+            importance: normalizeImportance(item.importance, 8),
+            last_accessed: Number(item.last_accessed || item.timestamp) || Date.now(),
+            retrieval_count: Math.max(0, Number(item.retrieval_count) || 0),
+            created_at: Number(item.created_at || item.timestamp) || Date.now(),
+            updated_at: Number(item.updated_at || item.timestamp) || Date.now(),
             source_contact: currentMemoContact.name || '',
             source_contact_id: currentMemoContact.id || '',
             impression_section: '',
@@ -1007,15 +1160,15 @@ function createPortableMemoryExportForCurrentContact() {
         if (!content) return;
         const ts = Number(item.timestamp) || Date.now();
         records.push({
-            id: `legacy-short-${currentMemoContact.id}-${ts}-${Math.random().toString(16).slice(2, 6)}`,
+            id: item.id || `legacy-short-${currentMemoContact.id}-${ts}-${Math.random().toString(16).slice(2, 6)}`,
             content,
-            embedding: [],
+            embedding: normalizeEmbedding(item.embedding),
             room: 'short_term',
-            importance: item.isDailySummary ? 7 : 5,
-            last_accessed: ts,
-            retrieval_count: 0,
-            created_at: ts,
-            updated_at: ts,
+            importance: normalizeImportance(item.importance, item.isDailySummary ? 7 : 5),
+            last_accessed: Number(item.last_accessed) || ts,
+            retrieval_count: Math.max(0, Number(item.retrieval_count) || 0),
+            created_at: Number(item.created_at) || ts,
+            updated_at: Number(item.updated_at) || ts,
             source_contact: currentMemoContact.name || '',
             source_contact_id: currentMemoContact.id || '',
             impression_section: '',
@@ -1034,16 +1187,17 @@ function createPortableMemoryExportForCurrentContact() {
         const content = String(bucket.userImpressions?.[section] || '').trim();
         if (!content) return;
         const nowTs = Date.now();
+        const meta = bucket.userImpressionMeta?.[section] || createMemoryMeta({ room: 'impression', importance: 8 });
         records.push({
-            id: `legacy-impression-${currentMemoContact.id}-${section}`,
+            id: meta.id || `legacy-impression-${currentMemoContact.id}-${section}`,
             content,
-            embedding: [],
+            embedding: normalizeEmbedding(meta.embedding),
             room: 'impression',
-            importance: 8,
-            last_accessed: nowTs,
-            retrieval_count: 0,
-            created_at: nowTs,
-            updated_at: nowTs,
+            importance: normalizeImportance(meta.importance, 8),
+            last_accessed: Number(meta.last_accessed) || nowTs,
+            retrieval_count: Math.max(0, Number(meta.retrieval_count) || 0),
+            created_at: Number(meta.created_at) || nowTs,
+            updated_at: Number(meta.updated_at) || nowTs,
             source_contact: currentMemoContact.name || '',
             source_contact_id: currentMemoContact.id || '',
             impression_section: section,
@@ -1100,7 +1254,15 @@ function replaceCurrentContactMemoriesFromPortableRecords(records) {
             const normalized = normalizeMemoryItem({
                 content,
                 keywords: item.legacy?.keywords || item.keywords || [],
-                timestamp: ts
+                timestamp: ts,
+                id: item.id,
+                embedding: item.embedding,
+                room: 'long_term',
+                importance: item.importance,
+                last_accessed: item.last_accessed,
+                retrieval_count: item.retrieval_count,
+                created_at: item.created_at,
+                updated_at: item.updated_at
             }, ts);
             if (normalized) {
                 bucket.longTermMemories.push(normalized);
@@ -1115,7 +1277,16 @@ function replaceCurrentContactMemoriesFromPortableRecords(records) {
                 keywords: item.legacy?.keywords || item.keywords || [],
                 source: item.legacy?.source || item.source || 'import',
                 isDailySummary: Boolean(item.legacy?.isDailySummary || item.isDailySummary),
-                timestamp: ts
+                timestamp: ts,
+                id: item.id,
+                embedding: item.embedding,
+                room: 'short_term',
+                importance: item.importance,
+                last_accessed: item.last_accessed,
+                retrieval_count: item.retrieval_count,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+                expires_at: item.expires_at
             }, ts);
             if (normalized) {
                 bucket.shortTermMemories.push(normalized);
@@ -1127,6 +1298,16 @@ function replaceCurrentContactMemoriesFromPortableRecords(records) {
         if (room === 'impression') {
             const section = USER_IMPRESSION_KEYS.includes(item.impression_section) ? item.impression_section : 'profile';
             bucket.userImpressions[section] = content;
+            bucket.userImpressionMeta[section] = createMemoryMeta({
+                id: item.id,
+                embedding: item.embedding,
+                room: 'impression',
+                importance: item.importance ?? 8,
+                last_accessed: item.last_accessed,
+                retrieval_count: item.retrieval_count,
+                created_at: item.created_at,
+                updated_at: item.updated_at
+            });
             count += 1;
         }
     });
@@ -1204,6 +1385,218 @@ function runMemoryMaintenance(memoriesMap) {
     return changed;
 }
 
+function cosineSimilarity(vecA, vecB) {
+    const a = normalizeEmbedding(vecA);
+    const b = normalizeEmbedding(vecB);
+    const len = Math.min(a.length, b.length);
+    if (!len) return 0;
+    let dot = 0;
+    let magA = 0;
+    let magB = 0;
+    for (let i = 0; i < len; i++) {
+        dot += a[i] * b[i];
+        magA += a[i] * a[i];
+        magB += b[i] * b[i];
+    }
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+
+function getMemoryStrength(memory) {
+    const importance = normalizeImportance(memory?.importance, 5);
+    const retrievalCount = Math.max(0, Number(memory?.retrieval_count) || 0);
+    return importance * 5 * (retrievalCount + 1);
+}
+
+function calculateRetention(memory, nowTs = Date.now()) {
+    const lastAccessed = Number(memory?.last_accessed || memory?.timestamp || memory?.created_at) || nowTs;
+    const elapsedDays = Math.max(0, (nowTs - lastAccessed) / (24 * 60 * 60 * 1000));
+    const strength = Math.max(1, getMemoryStrength(memory));
+    let retention = Math.exp(-elapsedDays / strength);
+    if (normalizeImportance(memory?.importance, 5) >= 8) {
+        retention = Math.max(retention, 0.5);
+    }
+    return Math.max(0, Math.min(1, retention));
+}
+
+function getMemoryRetentionState(retention) {
+    if (retention <= MEMORY_FORGETTING_THRESHOLD) return 'forgotten';
+    if (retention <= MEMORY_FUZZY_THRESHOLD) return 'fuzzy';
+    return 'fresh';
+}
+
+function buildVectorMemoryRecord(memory, contactId, room, extra = {}) {
+    return {
+        ...memory,
+        id: memory.id || createMemoryId(room),
+        room: normalizeMemoryRoom(room, 'short_term'),
+        source_contact_id: contactId || memory.source_contact_id || '',
+        source_contact: extra.source_contact || memory.source_contact || '',
+        impression_section: extra.impression_section || memory.impression_section || '',
+        expires_at: extra.expires_at ?? memory.expires_at ?? null,
+        schedule_at: extra.schedule_at ?? memory.schedule_at ?? null,
+        updated_at: Date.now()
+    };
+}
+
+function flattenMemoriesForRetrieval(memoriesMap, contactId = null) {
+    const records = [];
+    Object.entries(memoriesMap || {}).forEach(([id, rawBucket]) => {
+        if (contactId && String(id) !== String(contactId)) return;
+        const bucket = normalizeContactMemoryBucket(rawBucket);
+        (bucket.longTermMemories || []).forEach(item => {
+            records.push(buildVectorMemoryRecord(item, id, 'long_term'));
+        });
+        (bucket.shortTermMemories || []).forEach(item => {
+            const expiresAt = Number(item.expires_at) || ((Number(item.timestamp) || Date.now()) + SHORT_TERM_MEMORY_TTL_MS);
+            records.push(buildVectorMemoryRecord(item, id, 'short_term', { expires_at: expiresAt }));
+        });
+        USER_IMPRESSION_KEYS.forEach(section => {
+            const content = String(bucket.userImpressions?.[section] || '').trim();
+            if (!content) return;
+            const meta = bucket.userImpressionMeta?.[section] || createMemoryMeta({ room: 'impression', importance: 8 });
+            records.push(buildVectorMemoryRecord({ ...meta, content, keywords: [] }, id, 'impression', { impression_section: section }));
+        });
+    });
+    return records;
+}
+
+function updateRetrievedMemoryStats(retrievedMemories, contactId = null) {
+    if (!Array.isArray(retrievedMemories) || retrievedMemories.length === 0) return;
+    const mems = DB.getMemories();
+    let changed = false;
+    retrievedMemories.forEach(record => {
+        const targetContactId = contactId || record.source_contact_id;
+        const bucket = mems[targetContactId];
+        if (!bucket) return;
+        const nowTs = Date.now();
+        if (record.room === 'long_term') {
+            const item = bucket.longTermMemories.find(memory => memory.id === record.id);
+            if (item) {
+                item.retrieval_count = Math.max(0, Number(item.retrieval_count) || 0) + 1;
+                item.last_accessed = nowTs;
+                item.updated_at = nowTs;
+                changed = true;
+            }
+        } else if (record.room === 'short_term') {
+            const item = bucket.shortTermMemories.find(memory => memory.id === record.id);
+            if (item) {
+                item.retrieval_count = Math.max(0, Number(item.retrieval_count) || 0) + 1;
+                item.last_accessed = nowTs;
+                item.updated_at = nowTs;
+                changed = true;
+            }
+        } else if (record.room === 'impression' && USER_IMPRESSION_KEYS.includes(record.impression_section)) {
+            if (!bucket.userImpressionMeta) bucket.userImpressionMeta = createDefaultUserImpressionMeta();
+            const meta = bucket.userImpressionMeta[record.impression_section] || createMemoryMeta({ room: 'impression', importance: 8 });
+            meta.retrieval_count = Math.max(0, Number(meta.retrieval_count) || 0) + 1;
+            meta.last_accessed = nowTs;
+            meta.updated_at = nowTs;
+            bucket.userImpressionMeta[record.impression_section] = meta;
+            changed = true;
+        }
+    });
+    if (changed) DB.saveMemories(mems);
+}
+
+async function syncVectorMemoryRecord(record) {
+    if (!dbInstance || !record?.id || !dbInstance.objectStoreNames.contains(IDB_VECTOR_MEMORY_STORE_NAME)) return;
+    return new Promise((resolve) => {
+        const transaction = dbInstance.transaction([IDB_VECTOR_MEMORY_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(IDB_VECTOR_MEMORY_STORE_NAME);
+        store.put(record);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => {
+            console.warn('向量记忆索引同步失败', transaction.error);
+            resolve(false);
+        };
+    });
+}
+
+async function saveMemory(content, embedding = [], room = 'short_term', importance = 5, contactId = null) {
+    const text = String(content || '').trim();
+    if (!text) throw new Error('记忆内容不能为空');
+    const targetContactId = contactId || currentMemoContact?.id || currentChatContact?.id;
+    if (!targetContactId) throw new Error('缺少记忆所属角色');
+    const normalizedRoom = normalizeMemoryRoom(room, 'short_term');
+    const nowTs = Date.now();
+    const item = normalizeMemoryItem({
+        id: createMemoryId(normalizedRoom),
+        content: text,
+        keywords: [],
+        embedding,
+        room: normalizedRoom,
+        importance,
+        timestamp: nowTs,
+        last_accessed: nowTs,
+        retrieval_count: 0,
+        created_at: nowTs,
+        updated_at: nowTs,
+        source: 'manual'
+    }, nowTs, normalizedRoom);
+
+    if (normalizeEmbedding(item.embedding).length === 0 && hasEmbeddingApiConfig()) {
+        await ensureMemoryEmbedding(item, text);
+    }
+
+    const mems = DB.getMemories();
+    if (!mems[targetContactId]) mems[targetContactId] = createEmptyMemoBucket();
+    if (normalizedRoom === 'long_term') {
+        mems[targetContactId].longTermMemories.push(item);
+    } else if (normalizedRoom === 'impression') {
+        mems[targetContactId].userImpressions.notes = [mems[targetContactId].userImpressions.notes, text].filter(Boolean).join('\n');
+        mems[targetContactId].userImpressionMeta.notes = createMemoryMeta(item);
+    } else {
+        item.source = 'manual';
+        item.expires_at = nowTs + SHORT_TERM_MEMORY_TTL_MS;
+        mems[targetContactId].shortTermMemories.push(item);
+    }
+    DB.saveMemories(mems);
+    await syncVectorMemoryRecord(buildVectorMemoryRecord(item, targetContactId, normalizedRoom));
+    return item;
+}
+
+async function retrieveMemory(inputEmbedding, options = {}) {
+    const embedding = normalizeEmbedding(inputEmbedding);
+    const limit = Math.max(3, Math.min(5, Number(options.limit) || 5));
+    const contactId = options.contactId || currentChatContact?.id || currentMemoContact?.id || null;
+    const nowTs = Date.now();
+    const records = flattenMemoriesForRetrieval(DB.getMemories(), contactId);
+
+    const ranked = records
+        .map(record => {
+            const retention = calculateRetention(record, nowTs);
+            const state = getMemoryRetentionState(retention);
+            if (state === 'forgotten') return null;
+            const similarity = embedding.length && record.embedding?.length
+                ? Math.max(0, cosineSimilarity(embedding, record.embedding))
+                : (options.keywordText ? getLegacyKeywordSimilarity(record, options.keywordText) : 0);
+            return {
+                ...record,
+                retention,
+                retention_state: state,
+                similarity,
+                score: similarity * retention
+            };
+        })
+        .filter(Boolean)
+        .filter(record => record.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+    updateRetrievedMemoryStats(ranked, contactId);
+    return ranked;
+}
+
+function getLegacyKeywordSimilarity(entry, inputText) {
+    const text = String(inputText || '').trim();
+    if (!text || !entry?.content) return 0;
+    const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
+    if (keywords.some(kw => kw && text.includes(kw))) return 0.85;
+    if (text.includes(entry.content) || entry.content.includes(text.slice(0, 12))) return 0.65;
+    return 0;
+}
+
 function createOfflineBuzzwordRule(data = {}) {
     return {
         id: data.id || `offline-bagua-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1267,6 +1660,13 @@ const DB = {
             url: 'https://api.openai.com/v1',
             key: '',
             model: 'gpt-3.5-turbo',
+            embeddingUrl: '',
+            embeddingKey: '',
+            embeddingModel: '',
+            summaryUrl: '',
+            summaryKey: '',
+            summaryModel: '',
+            vectorMemoryNoticeDismissed: false,
             prompt: DEFAULT_SYSTEM_PROMPT,
             fullscreen: true,
             hideNotch: false,
@@ -1281,6 +1681,13 @@ const DB = {
         };
         if (!saved) return defaultSettings;
         if (!saved.prompt || saved.prompt.length < 50) saved.prompt = DEFAULT_SYSTEM_PROMPT;
+        if (saved.embeddingUrl === undefined) saved.embeddingUrl = '';
+        if (saved.embeddingKey === undefined) saved.embeddingKey = '';
+        if (saved.embeddingModel === undefined) saved.embeddingModel = '';
+        if (saved.summaryUrl === undefined) saved.summaryUrl = '';
+        if (saved.summaryKey === undefined) saved.summaryKey = '';
+        if (saved.summaryModel === undefined) saved.summaryModel = '';
+        if (saved.vectorMemoryNoticeDismissed === undefined) saved.vectorMemoryNoticeDismissed = false;
         if (saved.fullscreen === undefined) saved.fullscreen = true;
         if (saved.hideNotch === undefined) saved.hideNotch = false;
         if (saved.hideStatusInfo === undefined) saved.hideStatusInfo = false;
@@ -2027,6 +2434,12 @@ function loadSettings() {
     document.getElementById('api-url').value = s.url;
     document.getElementById('api-key').value = s.key;
     document.getElementById('model-name').value = s.model;
+    document.getElementById('embedding-api-url').value = s.embeddingUrl || '';
+    document.getElementById('embedding-api-key').value = s.embeddingKey || '';
+    document.getElementById('embedding-model-name').value = s.embeddingModel || '';
+    document.getElementById('summary-api-url').value = s.summaryUrl || '';
+    document.getElementById('summary-api-key').value = s.summaryKey || '';
+    document.getElementById('summary-model-name').value = s.summaryModel || '';
     document.getElementById('system-prompt').value = s.prompt;
     document.getElementById('fullscreen-toggle').checked = s.fullscreen;
     document.getElementById('hide-notch-toggle').checked = s.hideNotch === true;
@@ -2062,6 +2475,12 @@ function saveSettings() {
         url: document.getElementById('api-url').value,
         key: document.getElementById('api-key').value,
         model: document.getElementById('model-name').value,
+        embeddingUrl: document.getElementById('embedding-api-url').value,
+        embeddingKey: document.getElementById('embedding-api-key').value,
+        embeddingModel: document.getElementById('embedding-model-name').value,
+        summaryUrl: document.getElementById('summary-api-url').value,
+        summaryKey: document.getElementById('summary-api-key').value,
+        summaryModel: document.getElementById('summary-model-name').value,
         prompt: document.getElementById('system-prompt').value,
         fullscreen: document.getElementById('fullscreen-toggle').checked,
         hideNotch: document.getElementById('hide-notch-toggle').checked,
@@ -2106,6 +2525,7 @@ function applyKeepAliveAudioState() {
 
 async function getNotificationRegistration() {
     if (!('serviceWorker' in navigator)) return null;
+    if (!isSecureWebProtocol()) return null;
     try {
         let registration = await navigator.serviceWorker.getRegistration();
         if (!registration) {
@@ -2215,6 +2635,74 @@ function getChatCompletionsUrl(rawUrl) {
 
 function getModelsUrl(rawUrl) {
     return buildApiUrl(rawUrl, '/models');
+}
+
+function getEmbeddingsUrl(rawUrl) {
+    return buildApiUrl(rawUrl, '/embeddings');
+}
+
+function getEmbeddingApiConfig(settings = DB.getSettings()) {
+    return {
+        url: settings.embeddingUrl || '',
+        key: settings.embeddingKey || '',
+        model: settings.embeddingModel || ''
+    };
+}
+
+function getSummaryApiConfig(settings = DB.getSettings()) {
+    return {
+        url: settings.summaryUrl || settings.url,
+        key: settings.summaryKey || settings.key,
+        model: settings.summaryModel || settings.model
+    };
+}
+
+function hasEmbeddingApiConfig(settings = DB.getSettings()) {
+    const cfg = getEmbeddingApiConfig(settings);
+    return Boolean(cfg.url && cfg.key && cfg.model);
+}
+
+async function generateEmbedding(text) {
+    const cfg = getEmbeddingApiConfig();
+    if (!cfg.url || !cfg.key || !cfg.model) {
+        throw new Error('请先在设置中填写向量模型 Base URL、API Key 和 Model Name');
+    }
+    const res = await fetch(getEmbeddingsUrl(cfg.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
+        body: JSON.stringify({ model: cfg.model, input: String(text || '') })
+    });
+    if (!res.ok) throw new Error(`向量模型请求失败：HTTP ${res.status}`);
+    const data = await res.json();
+    const embedding = data?.data?.[0]?.embedding || data?.embedding;
+    const normalized = normalizeEmbedding(embedding);
+    if (normalized.length === 0) throw new Error('向量模型未返回 embedding 数组');
+    return normalized;
+}
+
+async function ensureMemoryEmbedding(memoryItem, text) {
+    if (!memoryItem || !String(text || '').trim()) return false;
+    if (normalizeEmbedding(memoryItem.embedding).length > 0) return false;
+    if (!hasEmbeddingApiConfig()) throw new Error('向量模型未配置，已保存记忆但未生成向量');
+    memoryItem.embedding = await generateEmbedding(text);
+    memoryItem.updated_at = Date.now();
+    return true;
+}
+
+async function tryEnsureGeneratedMemoryEmbedding(memoryItem, text, room, contactId, section = '') {
+    try {
+        await ensureMemoryEmbedding(memoryItem, text);
+        if (normalizeEmbedding(memoryItem?.embedding).length > 0) {
+            await syncVectorMemoryRecord(buildVectorMemoryRecord(
+                { ...memoryItem, content: text },
+                contactId,
+                room,
+                { impression_section: section }
+            ));
+        }
+    } catch (error) {
+        console.warn('自动总结记忆向量生成跳过:', error);
+    }
 }
 
 async function fetchModels(btn) {
@@ -3579,7 +4067,7 @@ function closeMemoEditor() {
     document.getElementById('memo-editor-modal').classList.remove('active');
 }
 
-function saveMemoEditor() {
+async function saveMemoEditor() {
     if (!currentMemoContact) return;
     const mems = DB.getMemories();
     if (!mems[currentMemoContact.id]) mems[currentMemoContact.id] = createEmptyMemoBucket();
@@ -3589,30 +4077,109 @@ function saveMemoEditor() {
     const keywords = normalizeKeywords((document.getElementById('memo-editor-keywords').value || '').split(','));
     const source = document.getElementById('memo-editor-source').value;
     const nowTs = Date.now();
+    const saveBtn = document.querySelector('#memo-editor-modal .save-btn');
+    const originalBtnText = saveBtn?.innerText || '保存';
+    let vectorTarget = null;
+    let vectorText = content;
+    let vectorRoom = '';
+    let vectorSection = '';
+    let vectorWarning = '';
 
-    if (memoEditorState.mode === 'longTerm') {
-        if (!content) return alert('请输入长效记忆内容');
-        const payload = { content, keywords, timestamp: nowTs };
-        if (memoEditorState.editType === 'longTermMemories' && memoEditorState.editIndex >= 0) {
-            bucket.longTermMemories[memoEditorState.editIndex] = { ...bucket.longTermMemories[memoEditorState.editIndex], ...payload };
-        } else {
-            bucket.longTermMemories.push(payload);
-        }
-    } else if (memoEditorState.mode === 'shortTerm') {
-        if (!content) return alert('请输入短效记忆内容');
-        const payload = { content, keywords, source: source || 'chat', timestamp: nowTs };
-        if (memoEditorState.editType === 'shortTermMemories' && memoEditorState.editIndex >= 0) {
-            bucket.shortTermMemories[memoEditorState.editIndex] = { ...bucket.shortTermMemories[memoEditorState.editIndex], ...payload };
-        } else {
-            bucket.shortTermMemories.push(payload);
-        }
-    } else if (memoEditorState.mode === 'impression') {
-        bucket.userImpressions[memoEditorState.section] = content;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerText = '保存中...';
     }
 
-    DB.saveMemories(mems);
-    closeMemoEditor();
-    renderMemoDetailList();
+    try {
+        if (memoEditorState.mode === 'longTerm') {
+            if (!content) return alert('请输入长效记忆内容');
+            const existing = memoEditorState.editType === 'longTermMemories' && memoEditorState.editIndex >= 0
+                ? bucket.longTermMemories[memoEditorState.editIndex]
+                : null;
+            const payload = normalizeMemoryItem({
+                ...(existing || {}),
+                content,
+                keywords,
+                timestamp: nowTs,
+                room: 'long_term',
+                importance: existing?.importance ?? 8,
+                embedding: existing?.content === content ? existing?.embedding : []
+            }, nowTs, 'long_term');
+            vectorTarget = payload;
+            vectorRoom = 'long_term';
+            if (memoEditorState.editType === 'longTermMemories' && memoEditorState.editIndex >= 0) {
+                bucket.longTermMemories[memoEditorState.editIndex] = payload;
+            } else {
+                bucket.longTermMemories.push(payload);
+            }
+        } else if (memoEditorState.mode === 'shortTerm') {
+            if (!content) return alert('请输入短效记忆内容');
+            const existing = memoEditorState.editType === 'shortTermMemories' && memoEditorState.editIndex >= 0
+                ? bucket.shortTermMemories[memoEditorState.editIndex]
+                : null;
+            const payload = normalizeMemoryItem({
+                ...(existing || {}),
+                content,
+                keywords,
+                source: source || 'chat',
+                timestamp: nowTs,
+                room: 'short_term',
+                importance: existing?.importance ?? 5,
+                embedding: existing?.content === content ? existing?.embedding : [],
+                expires_at: existing?.expires_at || nowTs + SHORT_TERM_MEMORY_TTL_MS
+            }, nowTs, 'short_term');
+            vectorTarget = payload;
+            vectorRoom = 'short_term';
+            if (memoEditorState.editType === 'shortTermMemories' && memoEditorState.editIndex >= 0) {
+                bucket.shortTermMemories[memoEditorState.editIndex] = payload;
+            } else {
+                bucket.shortTermMemories.push(payload);
+            }
+        } else if (memoEditorState.mode === 'impression') {
+            const previousContent = bucket.userImpressions?.[memoEditorState.section] || '';
+            bucket.userImpressions[memoEditorState.section] = content;
+            if (!bucket.userImpressionMeta) bucket.userImpressionMeta = createDefaultUserImpressionMeta();
+            const existing = bucket.userImpressionMeta[memoEditorState.section] || createMemoryMeta({ room: 'impression', importance: 8 });
+            const meta = createMemoryMeta({
+                ...existing,
+                room: 'impression',
+                importance: existing.importance ?? 8,
+                embedding: previousContent === content ? existing.embedding : [],
+                timestamp: nowTs,
+                updated_at: nowTs
+            });
+            meta.content = content;
+            bucket.userImpressionMeta[memoEditorState.section] = meta;
+            vectorTarget = meta;
+            vectorRoom = 'impression';
+            vectorSection = memoEditorState.section;
+        }
+
+        try {
+            await ensureMemoryEmbedding(vectorTarget, vectorText);
+        } catch (error) {
+            vectorWarning = error.message;
+            console.warn('手动记忆向量生成失败:', error);
+        }
+
+        DB.saveMemories(mems);
+        if (vectorTarget && normalizeEmbedding(vectorTarget.embedding).length > 0) {
+            await syncVectorMemoryRecord(buildVectorMemoryRecord(
+                { ...vectorTarget, content: vectorText },
+                currentMemoContact.id,
+                vectorRoom,
+                { impression_section: vectorSection }
+            ));
+        }
+        closeMemoEditor();
+        renderMemoDetailList();
+        if (vectorWarning) alert(vectorWarning);
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerText = originalBtnText;
+        }
+    }
 }
 
 function addLongTermMemory() { openMemoEditor('longTerm'); }
@@ -3658,6 +4225,70 @@ function openMemoSettings() {
 
 function closeMemoSettings() {
     document.getElementById('memo-settings-modal').classList.remove('active');
+}
+
+function setRecomputeVectorStatus(text, isError = false) {
+    const el = document.getElementById('recompute-memory-vectors-status');
+    if (!el) return;
+    el.innerText = text;
+    el.style.color = isError ? '#ff3b30' : '#888';
+}
+
+async function recomputeCurrentMemoVectors() {
+    if (!currentMemoContact) return alert('请先进入某个角色的记忆页');
+    if (!hasEmbeddingApiConfig()) return alert('请先在设置中完整配置向量模型 API Base URL、API Key 和 Model Name');
+    const mems = DB.getMemories();
+    if (!mems[currentMemoContact.id]) mems[currentMemoContact.id] = createEmptyMemoBucket();
+    const bucket = normalizeContactMemoryBucket(mems[currentMemoContact.id]);
+    const tasks = [
+        ...bucket.longTermMemories.map(item => ({ item, room: 'long_term', text: item.content })),
+        ...bucket.shortTermMemories.map(item => ({ item, room: 'short_term', text: item.content }))
+    ];
+    USER_IMPRESSION_KEYS.forEach(section => {
+        const text = String(bucket.userImpressions?.[section] || '').trim();
+        if (text) {
+            if (!bucket.userImpressionMeta) bucket.userImpressionMeta = createDefaultUserImpressionMeta();
+            tasks.push({ item: bucket.userImpressionMeta[section], room: 'impression', text, section });
+        }
+    });
+
+    if (tasks.length === 0) return alert('当前角色暂无可计算向量的记忆');
+    const btn = document.getElementById('recompute-memory-vectors-btn');
+    const originalText = btn?.innerText || '重新计算所有向量';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '正在计算...';
+    }
+    try {
+        for (let i = 0; i < tasks.length; i++) {
+            const task = tasks[i];
+            setRecomputeVectorStatus(`正在计算 ${i + 1}/${tasks.length}：${task.room}`);
+            const embedding = await generateEmbedding(task.text);
+            task.item.embedding = embedding;
+            task.item.room = task.room;
+            task.item.importance = normalizeImportance(task.item.importance, task.room === 'short_term' ? 5 : 8);
+            task.item.last_accessed = Number(task.item.last_accessed) || Date.now();
+            task.item.retrieval_count = Math.max(0, Number(task.item.retrieval_count) || 0);
+            task.item.updated_at = Date.now();
+            if (task.section) {
+                bucket.userImpressionMeta[task.section] = task.item;
+            }
+            await syncVectorMemoryRecord(buildVectorMemoryRecord({ ...task.item, content: task.text }, currentMemoContact.id, task.room, { impression_section: task.section || '' }));
+        }
+        mems[currentMemoContact.id] = bucket;
+        DB.saveMemories(mems);
+        renderMemoDetailList();
+        setRecomputeVectorStatus(`已完成：共重新计算 ${tasks.length} 条向量`);
+        alert(`已重新计算 ${tasks.length} 条记忆向量`);
+    } catch (e) {
+        setRecomputeVectorStatus('重新计算失败：' + e.message, true);
+        alert('重新计算向量失败：' + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+    }
 }
 
 function addImportantMemoryFromSettings() {
@@ -3741,7 +4372,8 @@ function confirmTransferShortToLong() {
 async function summarizeUserImpressionsFromSettings() {
     if (!currentMemoContact) return;
     const settings = DB.getSettings();
-    if (!settings.key) return alert('请先在设置中配置 API Key');
+    const summaryCfg = getSummaryApiConfig(settings);
+    if (!summaryCfg.key) return alert('请先在设置中配置聊天 API Key，或单独配置总结模型 API Key');
     if (!confirm('将根据近期聊天与记忆，一键更新“基础认知/我们的关系/关于TA的注意事项”。是否继续？')) return;
 
     const history = DB.getChats()[currentMemoContact.id] || [];
@@ -3788,11 +4420,11 @@ ${memoryText || '（暂无）'}
 {"profile":"...","relationship":"...","notes":"..."}`;
 
     try {
-        const res = await fetch(getChatCompletionsUrl(settings.url), {
+        const res = await fetch(getChatCompletionsUrl(summaryCfg.url), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${summaryCfg.key}` },
             body: JSON.stringify({
-                model: settings.model,
+                model: summaryCfg.model,
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.4
             })
@@ -3846,7 +4478,8 @@ async function triggerManualDailySummary() {
     if (!currentMemoContact) return;
     
     const settings = DB.getSettings();
-    if (!settings.key) return alert('请先在设置中配置 API Key');
+    const summaryCfg = getSummaryApiConfig(settings);
+    if (!summaryCfg.key) return alert('请先在设置中配置聊天 API Key，或单独配置总结模型 API Key');
     
     if (!confirm('确定要执行每日总结吗？\n这将总结过去24小时的聊天记录和记忆。')) return;
     
@@ -3874,7 +4507,8 @@ function isImportantMemory(text) {
 
 async function executeDailySummary(contact) {
     const settings = DB.getSettings();
-    if (!settings.key) return;
+    const summaryCfg = getSummaryApiConfig(settings);
+    if (!summaryCfg.key) return;
     
     const now = new Date();
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -3952,10 +4586,10 @@ ${memText || '（无记忆片段）'}
 - 只返回 JSON，不要输出任何额外说明`;
 
     try {
-        const res = await fetch(getChatCompletionsUrl(settings.url), {
+        const res = await fetch(getChatCompletionsUrl(summaryCfg.url), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` },
-            body: JSON.stringify({ model: settings.model, messages: [{ role: "user", content: prompt }], temperature: 0.3 })
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${summaryCfg.key}` },
+            body: JSON.stringify({ model: summaryCfg.model, messages: [{ role: "user", content: prompt }], temperature: 0.3 })
         });
         
         const data = await res.json();
@@ -3976,48 +4610,79 @@ ${memText || '（无记忆片段）'}
                     });
                     
                     const dateStr = now.toLocaleDateString('zh-CN');
-                    updatedMems[contact.id].shortTermMemories.push({
+                    const dailySummaryItem = normalizeMemoryItem({
                         content: `【${dateStr} 每日总结】\n${result.dailySummary}`,
                         keywords: normalizeKeywords(result.keywords || []),
                         timestamp: now.getTime(),
                         source: 'chat',
-                        isDailySummary: true
-                    });
+                        isDailySummary: true,
+                        room: 'short_term',
+                        importance: 7
+                    }, now.getTime(), 'short_term');
+                    if (dailySummaryItem) {
+                        await tryEnsureGeneratedMemoryEmbedding(dailySummaryItem, dailySummaryItem.content, 'short_term', contact.id);
+                        updatedMems[contact.id].shortTermMemories.push(dailySummaryItem);
+                    }
                     
                     const longTermMemories = Array.isArray(result.longTermMemories) ? result.longTermMemories : [];
                     const filteredImportantMemories = longTermMemories.filter(impMem => isImportantMemory(impMem));
                     
                     if (filteredImportantMemories.length > 0) {
-                        filteredImportantMemories.forEach(impMem => {
+                        for (const impMem of filteredImportantMemories) {
                             if (impMem && impMem.trim()) {
-                                updatedMems[contact.id].longTermMemories.push({
+                                const longItem = normalizeMemoryItem({
                                     content: `【${dateStr}】${impMem}`,
                                     keywords: [],
-                                    timestamp: now.getTime()
-                                });
+                                    timestamp: now.getTime(),
+                                    room: 'long_term',
+                                    importance: 8
+                                }, now.getTime(), 'long_term');
+                                if (longItem) {
+                                    await tryEnsureGeneratedMemoryEmbedding(longItem, longItem.content, 'long_term', contact.id);
+                                    updatedMems[contact.id].longTermMemories.push(longItem);
+                                }
                             }
-                        });
+                        }
                     }
 
                     const shortTermMemories = Array.isArray(result.shortTermMemories) ? result.shortTermMemories : [];
-                    shortTermMemories.forEach(shortMem => {
+                    for (const shortMem of shortTermMemories) {
                         const normalized = normalizeMemoryItem({
                             content: shortMem,
                             keywords: result.keywords || [],
                             source: 'chat',
-                            timestamp: now.getTime()
-                        });
-                        if (normalized) updatedMems[contact.id].shortTermMemories.push(normalized);
-                    });
+                            timestamp: now.getTime(),
+                            room: 'short_term',
+                            importance: 5
+                        }, now.getTime(), 'short_term');
+                        if (normalized) {
+                            await tryEnsureGeneratedMemoryEmbedding(normalized, normalized.content, 'short_term', contact.id);
+                            updatedMems[contact.id].shortTermMemories.push(normalized);
+                        }
+                    }
 
                     if (result.userImpressions && typeof result.userImpressions === 'object') {
                         const target = updatedMems[contact.id].userImpressions || createDefaultUserImpressions();
-                        USER_IMPRESSION_KEYS.forEach(key => {
+                        if (!updatedMems[contact.id].userImpressionMeta) updatedMems[contact.id].userImpressionMeta = createDefaultUserImpressionMeta();
+                        for (const key of USER_IMPRESSION_KEYS) {
                             const value = result.userImpressions[key];
                             if (typeof value === 'string' && value.trim()) {
+                                const previousContent = target[key] || '';
                                 target[key] = value.trim();
+                                const existingMeta = updatedMems[contact.id].userImpressionMeta[key] || createMemoryMeta({ room: 'impression', importance: 8 });
+                                const meta = createMemoryMeta({
+                                    ...existingMeta,
+                                    room: 'impression',
+                                    importance: existingMeta.importance ?? 8,
+                                    embedding: previousContent === value.trim() ? existingMeta.embedding : [],
+                                    timestamp: now.getTime(),
+                                    updated_at: now.getTime()
+                                });
+                                meta.content = value.trim();
+                                await tryEnsureGeneratedMemoryEmbedding(meta, value.trim(), 'impression', contact.id, key);
+                                updatedMems[contact.id].userImpressionMeta[key] = meta;
                             }
-                        });
+                        }
                         updatedMems[contact.id].userImpressions = target;
                     }
                     
@@ -7427,19 +8092,56 @@ async function triggerAIResponse(options = {}) {
         systemContent += `\n\n[🧠 用户印象 - 常驻]\n${impressionLines.join('\n')}\n`;
     }
 
-    const triggeredShortTerm = mems.shortTermMemories
-        .filter(item => nowTs - (Number(item.timestamp) || 0) <= SHORT_TERM_MEMORY_TTL_MS)
-        .filter(item => matchByKeyword(item))
-        .slice(-6);
-    if (triggeredShortTerm.length > 0) {
-        systemContent += `\n\n[⏳ 短效记忆 - 72小时]\n`;
-        triggeredShortTerm.forEach((m, i) => { systemContent += `${i+1}. ${m.content}\n`; });
+    let retrievedVectorMemories = [];
+    if (lastUserMsg && hasEmbeddingApiConfig()) {
+        try {
+            const inputEmbedding = await generateEmbedding(lastUserMsg);
+            retrievedVectorMemories = await retrieveMemory(inputEmbedding, {
+                contactId: currentChatContact.id,
+                keywordText: lastUserMsg,
+                limit: 5
+            });
+        } catch (error) {
+            console.warn('向量记忆检索失败，回退关键词检索:', error);
+        }
     }
 
-    const triggeredLongTerm = mems.longTermMemories.filter(item => matchByKeyword(item)).slice(-8);
-    if (triggeredLongTerm.length > 0) {
-        systemContent += `\n\n[📌 长效记忆 - 按需检索]\n`;
-        triggeredLongTerm.forEach((m, i) => { systemContent += `${i+1}. ${m.content}\n`; });
+    if (retrievedVectorMemories.length > 0) {
+        systemContent += `\n\n[🧠 本地记忆宫殿 - 向量语义检索]\n`;
+        retrievedVectorMemories.forEach((m, i) => {
+            const roomLabel = m.room === 'long_term' ? '长效' : (m.room === 'short_term' ? '短效' : '用户印象');
+            const fuzzyMark = m.retention_state === 'fuzzy' ? '（模糊记忆）' : '';
+            systemContent += `${i + 1}. [${roomLabel}${fuzzyMark} R=${m.retention.toFixed(2)}] ${m.content}\n`;
+        });
+    } else {
+        const triggeredShortTerm = mems.shortTermMemories
+            .filter(item => nowTs - (Number(item.timestamp) || 0) <= SHORT_TERM_MEMORY_TTL_MS)
+            .filter(item => calculateRetention(item, nowTs) > MEMORY_FORGETTING_THRESHOLD)
+            .filter(item => matchByKeyword(item))
+            .slice(-6);
+        if (triggeredShortTerm.length > 0) {
+            systemContent += `\n\n[⏳ 短效记忆 - 关键词兼容检索]\n`;
+            triggeredShortTerm.forEach((m, i) => {
+                const retention = calculateRetention(m, nowTs);
+                const fuzzyMark = getMemoryRetentionState(retention) === 'fuzzy' ? '（模糊记忆）' : '';
+                systemContent += `${i+1}. ${fuzzyMark}${m.content}\n`;
+            });
+            updateRetrievedMemoryStats(triggeredShortTerm.map(item => ({ ...item, room: 'short_term', source_contact_id: currentChatContact.id })), currentChatContact.id);
+        }
+
+        const triggeredLongTerm = mems.longTermMemories
+            .filter(item => calculateRetention(item, nowTs) > MEMORY_FORGETTING_THRESHOLD)
+            .filter(item => matchByKeyword(item))
+            .slice(-8);
+        if (triggeredLongTerm.length > 0) {
+            systemContent += `\n\n[📌 长效记忆 - 关键词兼容检索]\n`;
+            triggeredLongTerm.forEach((m, i) => {
+                const retention = calculateRetention(m, nowTs);
+                const fuzzyMark = getMemoryRetentionState(retention) === 'fuzzy' ? '（模糊记忆）' : '';
+                systemContent += `${i+1}. ${fuzzyMark}${m.content}\n`;
+            });
+            updateRetrievedMemoryStats(triggeredLongTerm.map(item => ({ ...item, room: 'long_term', source_contact_id: currentChatContact.id })), currentChatContact.id);
+        }
     }
 
     if (isTimePerceptionEnabled) { const nowStr = new Date().toLocaleString('zh-CN', { hour12: false }); systemContent += `\n\n[时间感知模式已开启]\n当前现实时间：${nowStr}\n请注意：\n1. 每一条消息前都标记了发送时间，这仅供你判断时间流逝。\n2. **绝对不要**在回复开头显示时间戳（如 [12:00:00]），直接回复内容即可。\n3. 请根据当前时间判断你的作息（如深夜在睡觉或熬夜，早晨在通勤）。\n4. 观察用户回复的时间间隔。如果用户隔了很久才回，请根据人设做出反应（如吐槽、担心等）。`; }
@@ -7786,7 +8488,9 @@ async function triggerAIResponse(options = {}) {
 }
 
 async function generateSummary(contact, recentMessages) {
-    const settings = DB.getSettings(); if (!settings.key) return;
+    const settings = DB.getSettings();
+    const summaryCfg = getSummaryApiConfig(settings);
+    if (!summaryCfg.key) return;
     const msgsText = recentMessages.map(m => {
         const time = m.timestamp ? new Date(m.timestamp).toLocaleString('zh-CN', {hour12:false}) : "未知时间";
         return `[${time}] ${m.role === 'user' ? '用户' : '我'}: ${m.content || ''}`;
@@ -7814,7 +8518,7 @@ ${msgsText}
 
 当前时间：${nowStr}`;
     try {
-        const res = await fetch(getChatCompletionsUrl(settings.url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.key}` }, body: JSON.stringify({ model: settings.model, messages: [{ role: "user", content: prompt }], temperature: 0.5 }) });
+        const res = await fetch(getChatCompletionsUrl(summaryCfg.url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${summaryCfg.key}` }, body: JSON.stringify({ model: summaryCfg.model, messages: [{ role: "user", content: prompt }], temperature: 0.5 }) });
         const data = await res.json();
         if (data.choices?.length > 0) {
             let raw = data.choices[0].message.content.trim().replace(/```json/g, '').replace(/```/g, '').trim();
@@ -7826,27 +8530,53 @@ ${msgsText}
                 let hasWrite = false;
 
                 if (result.content && result.content !== "无") {
-                    bucket.shortTermMemories.push({
+                    const shortItem = normalizeMemoryItem({
                         content: String(result.content).trim(),
                         keywords: normalizeKeywords(result.keywords || []),
                         source: 'chat',
-                        timestamp: Date.now()
-                    });
-                    hasWrite = true;
+                        timestamp: Date.now(),
+                        room: 'short_term',
+                        importance: 5
+                    }, Date.now(), 'short_term');
+                    if (shortItem) {
+                        await tryEnsureGeneratedMemoryEmbedding(shortItem, shortItem.content, 'short_term', contact.id);
+                        bucket.shortTermMemories.push(shortItem);
+                        hasWrite = true;
+                    }
                 }
                 if (result.longTermMemory && isImportantMemory(result.longTermMemory)) {
-                    bucket.longTermMemories.push({
+                    const longItem = normalizeMemoryItem({
                         content: String(result.longTermMemory).trim(),
                         keywords: normalizeKeywords(result.keywords || []),
-                        timestamp: Date.now()
-                    });
-                    hasWrite = true;
+                        timestamp: Date.now(),
+                        room: 'long_term',
+                        importance: 8
+                    }, Date.now(), 'long_term');
+                    if (longItem) {
+                        await tryEnsureGeneratedMemoryEmbedding(longItem, longItem.content, 'long_term', contact.id);
+                        bucket.longTermMemories.push(longItem);
+                        hasWrite = true;
+                    }
                 }
                 if (result.userImpression && typeof result.userImpression === 'object') {
                     const section = result.userImpression.section;
                     const value = String(result.userImpression.content || '').trim();
                     if (USER_IMPRESSION_KEYS.includes(section) && value) {
+                        if (!bucket.userImpressionMeta) bucket.userImpressionMeta = createDefaultUserImpressionMeta();
+                        const previousContent = bucket.userImpressions[section] || '';
                         bucket.userImpressions[section] = value;
+                        const existingMeta = bucket.userImpressionMeta[section] || createMemoryMeta({ room: 'impression', importance: 8 });
+                        const meta = createMemoryMeta({
+                            ...existingMeta,
+                            room: 'impression',
+                            importance: existingMeta.importance ?? 8,
+                            embedding: previousContent === value ? existingMeta.embedding : [],
+                            timestamp: Date.now(),
+                            updated_at: Date.now()
+                        });
+                        meta.content = value;
+                        await tryEnsureGeneratedMemoryEmbedding(meta, value, 'impression', contact.id, section);
+                        bucket.userImpressionMeta[section] = meta;
                         hasWrite = true;
                     }
                 }
@@ -7859,7 +8589,13 @@ ${msgsText}
     } catch (e) { console.error("Summary generation failed:", e); }
 }
 
-if ('serviceWorker' in navigator) { window.addEventListener('load', function() { navigator.serviceWorker.register('./sw.js').then(r => console.log('SW registered:', r.scope)).catch(e => console.log('SW failed:', e)); }); }
+if (isSecureWebProtocol() && 'serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js')
+            .then(r => console.log('SW registered:', r.scope))
+            .catch(e => console.log('SW failed:', e));
+    });
+}
 
 // --- 情书功能已移除，保留入口按钮用于重建 ---
 

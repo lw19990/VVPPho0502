@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>VVPhone</title>
-    <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="iPhone Sim">
@@ -190,6 +189,19 @@
                 </div>
             </div>
 
+            <div id="vector-memory-notice-modal" class="vector-memory-notice-modal">
+                <div class="vector-memory-notice-card">
+                    <div class="vector-memory-notice-title">VV小手机已更新向量记忆功能</div>
+                    <div class="vector-memory-notice-body">
+                        VV小手机的记忆功能（备忘录）升级为了向量记忆，请前往前往硅基流动或其他站点获取向量模型（作者推荐免费的BAAI/bge-m3）并在设置界面中进行配置。
+                    </div>
+                    <div class="vector-memory-notice-warning">
+                        【注意】配置好向量模型后，请前往备忘录APP，点开右上角设置，点击【重新计算所有向量】按键，等待重新计算完成后，才能让旧记忆适配新向量功能，这一步非常重要，若跳过，角色将无法读取记忆！！！
+                    </div>
+                    <button class="vector-memory-notice-btn" onclick="dismissVectorMemoryNotice()">我已读完，不再显示该弹窗</button>
+                </div>
+            </div>
+
             <div id="widget-upload-modal" class="widget-upload-modal" onclick="closeWidgetUploadModal()">
                 <div class="widget-upload-modal-content" onclick="event.stopPropagation()">
                     <div class="widget-upload-modal-header">
@@ -276,6 +288,18 @@
                     </div>
                     <select id="model-select" style="display:none; margin-top:10px; width:100%;" onchange="selectModel(this)"></select>
                 </div>
+
+                <div class="settings-section-title" style="margin-top:20px;">向量记忆模型配置区</div>
+                <div style="font-size:11px; color:#888; margin-bottom:12px;">向量模型用于本地语义检索，必须配置 OpenAI 兼容的 embeddings 接口。</div>
+                <div class="form-group"><label>向量模型 API Base URL（必填）</label><input type="text" id="embedding-api-url" placeholder="https://api.openai.com/v1" required></div>
+                <div class="form-group"><label>向量模型 API Key（必填）</label><input type="password" id="embedding-api-key" placeholder="sk-..." required></div>
+                <div class="form-group"><label>向量模型 Model Name（必填）</label><input type="text" id="embedding-model-name" placeholder="text-embedding-3-small" required></div>
+
+                <div class="settings-section-title" style="margin-top:20px;">总结模型配置区（可选）</div>
+                <div style="font-size:11px; color:#888; margin-bottom:12px;">留空时，自动使用上方聊天 API 模型生成记忆总结。</div>
+                <div class="form-group"><label>总结模型 API Base URL</label><input type="text" id="summary-api-url" placeholder="留空则使用聊天 API Base URL"></div>
+                <div class="form-group"><label>总结模型 API Key</label><input type="password" id="summary-api-key" placeholder="留空则使用聊天 API Key"></div>
+                <div class="form-group"><label>总结模型 Model Name</label><input type="text" id="summary-model-name" placeholder="留空则使用聊天模型"></div>
 
                 <div class="form-group">
                     <label>模型温度 (Temperature)</label>
@@ -1390,6 +1414,8 @@
                     </div>
                     <div class="memo-import-export-tip">支持导入旧项目备份中的 memories，也支持导入新 AI 聊天器导出的记忆 JSON。导入后会覆盖当前角色原有记忆内容。</div>
                     <input id="memo-memory-import-input" type="file" accept=".json,application/json" hidden onchange="handleMemoMemoryImport(event)">
+                    <button id="recompute-memory-vectors-btn" class="save-btn" style="background:#1c1c1e; margin:14px 0 6px;" onclick="recomputeCurrentMemoVectors()">重新计算所有向量</button>
+                    <div id="recompute-memory-vectors-status" style="font-size:11px; color:#888; margin-bottom:14px;">会调用设置中的向量模型 API，为当前角色的长效记忆、短效记忆和用户印象重新生成 embedding。</div>
                     
                     <div class="settings-section-title">每日总结设置</div>
                     
