@@ -189,16 +189,16 @@
                 </div>
             </div>
 
-            <div id="vector-memory-notice-modal" class="vector-memory-notice-modal">
-                <div class="vector-memory-notice-card">
-                    <div class="vector-memory-notice-title">VV小手机已更新向量记忆功能</div>
-                    <div class="vector-memory-notice-body">
+            <div id="vector-memory-notice-modal" class="vector-memory-notice-modal" style="display:none; position:absolute; inset:0; z-index:320; align-items:center; justify-content:center; padding:26px; background:rgba(0,0,0,0.22);">
+                <div class="vector-memory-notice-card" style="width:100%; max-width:320px; background:#fff; color:#111; border-radius:22px; padding:22px 20px 18px; box-shadow:0 18px 50px rgba(0,0,0,0.22); line-height:1.55;">
+                    <div class="vector-memory-notice-title" style="font-size:18px; font-weight:800; line-height:1.35; margin-bottom:12px; text-align:center;">VV小手机已更新向量记忆功能</div>
+                    <div class="vector-memory-notice-body" style="font-size:14px; color:#333; margin-bottom:12px;">
                         VV小手机的记忆功能（备忘录）升级为了向量记忆，请前往前往硅基流动或其他站点获取向量模型（作者推荐免费的BAAI/bge-m3）并在设置界面中进行配置。
                     </div>
-                    <div class="vector-memory-notice-warning">
+                    <div class="vector-memory-notice-warning" style="font-size:14px; color:#ff3b30; font-weight:700; margin-bottom:18px;">
                         【注意】配置好向量模型后，请前往备忘录APP，点开右上角设置，点击【重新计算所有向量】按键，等待重新计算完成后，才能让旧记忆适配新向量功能，这一步非常重要，若跳过，角色将无法读取记忆！！！
                     </div>
-                    <button class="vector-memory-notice-btn" onclick="dismissVectorMemoryNotice()">我已读完，不再显示该弹窗</button>
+                    <button class="vector-memory-notice-btn" style="display:block; margin:0 auto; border:none; border-radius:999px; background:#111; color:#fff; font-size:13px; font-weight:700; padding:11px 16px; cursor:pointer;" onclick="dismissVectorMemoryNotice()">我已读完，不再显示该弹窗</button>
                 </div>
             </div>
 

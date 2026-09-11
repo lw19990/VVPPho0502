@@ -264,6 +264,7 @@ function showVectorMemoryNoticeIfNeeded() {
     if (settings.vectorMemoryNoticeDismissed === true) return;
     const modal = document.getElementById('vector-memory-notice-modal');
     if (!modal) return;
+    modal.style.display = 'flex';
     modal.classList.add('active');
 }
 
@@ -271,7 +272,11 @@ function dismissVectorMemoryNotice() {
     const settings = DB.getSettings();
     settings.vectorMemoryNoticeDismissed = true;
     DB.saveSettings(settings);
-    document.getElementById('vector-memory-notice-modal')?.classList.remove('active');
+    const modal = document.getElementById('vector-memory-notice-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+    }
 }
 
 function resetLockPasscodeEntry(clearError = true) {
